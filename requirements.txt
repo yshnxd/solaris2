@@ -6,4 +6,5 @@ yfinance
 ta
 scikit-learn
 joblib
-
+tensorflow
+pytz
