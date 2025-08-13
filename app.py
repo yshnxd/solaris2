@@ -1,4 +1,4 @@
-# app.py - SOLARIS — Stock Price Movement Predictor (Live chart periods added)
+# app.py - SOLARIS — Stock Price Movement Predictor (Dark intraday line chart + robust history append)
 import os
 import warnings
 warnings.filterwarnings("ignore")
@@ -224,6 +224,10 @@ def load_history():
 
 def save_history(df):
     try:
+        # ensure directories exist (if path contains dirs)
+        d = os.path.dirname(history_file)
+        if d:
+            os.makedirs(d, exist_ok=True)
         df.to_csv(history_file, index=False)
     except Exception as e:
         st.warning(f"Failed saving history to {history_file}: {e}")
@@ -384,7 +388,9 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
-    # Live Market View tab (UPDATED: flexible live chart periods)
+    # ------------------------------
+    # Live Market View tab (updated: single-line intraday "trading" chart)
+    # ------------------------------
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
@@ -393,83 +399,129 @@ if run_button:
         if data_is_stale:
             st.warning("Fetched market data is stale relative to the real-time clock. Predictions will use the latest available data but it may lag real-time.")
 
-        # Chart period selector
-        chart_period = st.selectbox("Chart period", options=["1d", "5d", "1mo", "6mo", "1y"], index=0)
-        # Map chart period to a reasonable yfinance interval
-        interval_map = {
-            "1d": "1m",    # intraday 1-minute
-            "5d": "15m",   # 15-minute bars
-            "1mo": "60m",  # hourly bars for month
-            "6mo": "1d",   # daily bars for 6 months
-            "1y": "1d"     # daily bars for 1 year
-        }
-        chart_interval = interval_map.get(chart_period, "1d")
+        # We attempt to fetch the highest-resolution intraday available (yfinance supports 1m)
+        intraday_df = pd.DataFrame()
+        try:
+            tk = yf.Ticker(ticker)
+            with st.spinner("Fetching intraday ticks (1m granularity)..."):
+                intraday_df = tk.history(period="1d", interval="1m", prepost=False, actions=False, auto_adjust=False)
+            if intraday_df is None or intraday_df.empty:
+                # fallback: use the raw data we downloaded earlier (if present)
+                intraday_df = raw.get(ticker, pd.DataFrame()).copy()
+        except Exception:
+            intraday_df = raw.get(ticker, pd.DataFrame()).copy()
 
-        # Fetch chart data separately (so user can view arbitrary period)
-        with st.spinner(f"Fetching chart data: {chart_period} @ {chart_interval}..."):
-            try:
-                tk = yf.Ticker(ticker)
-                # use history() which often returns tz-aware indices
-                chart_df = tk.history(period=chart_period, interval=chart_interval, auto_adjust=False)
-                if chart_df is None or chart_df.empty:
-                    st.warning("Chart data not available for selected period/interval.")
-                    chart_df = pd.DataFrame()
-            except Exception as e:
-                st.warning(f"Failed to fetch chart data: {e}")
-                chart_df = pd.DataFrame()
-
-        if not chart_df.empty:
-            # Ensure index is datetime
+        chart_df = intraday_df.copy()  # expose to Detailed Analysis later
+        if chart_df is None or chart_df.empty:
+            st.info("Intraday tick data not available to draw the realtime line chart.")
+        else:
+            # ensure datetime index
             try:
                 chart_df.index = pd.to_datetime(chart_df.index)
             except Exception:
                 pass
 
-            # Candlestick + volume (two-row subplot)
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(
-                x=chart_df.index,
-                open=chart_df['Open'],
-                high=chart_df['High'],
-                low=chart_df['Low'],
-                close=chart_df['Close'],
-                name=f"{ticker}"))
-            # optional SMA20 for visual cue (if enough data)
-            try:
-                if len(chart_df['Close']) >= 20:
-                    sma20 = chart_df['Close'].rolling(20).mean()
-                    fig.add_trace(go.Scatter(x=chart_df.index, y=sma20, mode='lines', name='SMA20', line=dict(width=1)))
-            except Exception:
-                pass
+            # get price series
+            price_series = chart_df['Close'].ffill().dropna()
+            if price_series.empty:
+                st.info("No intraday close prices available.")
+            else:
+                # compute previous close/reference: try 2-day daily history
+                prev_close = None
+                try:
+                    hist2d = tk.history(period="2d", interval="1d", auto_adjust=False)
+                    if hist2d is not None and len(hist2d) >= 2:
+                        # previous day's close is the penultimate row
+                        prev_close = float(hist2d['Close'].iloc[-2])
+                    else:
+                        # fallback: first recorded price in intraday
+                        prev_close = float(price_series.iloc[0])
+                except Exception:
+                    try:
+                        prev_close = float(price_series.iloc[0])
+                    except Exception:
+                        prev_close = None
 
-            # create a secondary subplot for volume as bars by overlaying using a second y-axis
-            fig.update_layout(
-                xaxis_rangeslider_visible=False,
-                height=600,
-                yaxis_title="Price",
-                bargap=0,
-            )
-            # add volume bars on same figure but referencing yaxis2
-            try:
-                fig.add_trace(go.Bar(x=chart_df.index, y=chart_df['Volume'], name='Volume', marker=dict(opacity=0.5), yaxis="y2"))
-                # configure secondary axis
+                current_price = float(price_series.iloc[-1])
+                current_time = price_series.index[-1]
+
+                # build dark-themed single-line chart
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=price_series.index,
+                    y=price_series.values,
+                    mode='lines',
+                    name=f"{ticker} Price",
+                    line=dict(width=2, color="#00E5FF")  # cyan-ish line
+                ))
+
+                # current price horizontal dashed red line + marker
+                try:
+                    fig.add_hline(
+                        y=current_price,
+                        line_dash="dash",
+                        line_color="red",
+                        annotation_text=f"Current: {current_price:.2f}",
+                        annotation_position="top left",
+                        annotation=dict(font=dict(color="white"))
+                    )
+                except Exception:
+                    pass
+
+                # previous close as white dashed line
+                if prev_close is not None:
+                    try:
+                        fig.add_hline(
+                            y=prev_close,
+                            line_dash="dash",
+                            line_color="white",
+                            annotation_text=f"Prev Close: {prev_close:.2f}",
+                            annotation_position="bottom left",
+                            annotation=dict(font=dict(color="white"))
+                        )
+                    except Exception:
+                        pass
+
+                # last-price marker
+                fig.add_trace(go.Scatter(
+                    x=[current_time],
+                    y=[current_price],
+                    mode='markers',
+                    marker=dict(color='red', size=8),
+                    name='Current Price'
+                ))
+
+                # dark theme styling (TradingView-like)
                 fig.update_layout(
-                    yaxis2=dict(
-                        title="Volume",
-                        overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        position=1.02,
-                        range=[0, chart_df['Volume'].max() * 4]  # scale so bars don't obscure candles
-                    ),
+                    plot_bgcolor="#0b1020",   # dark plot bg
+                    paper_bgcolor="#0b1020",
+                    font_color="white",
+                    height=520,
+                    hovermode="x unified",
+                    margin=dict(l=10, r=10, t=30, b=30),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-            except Exception:
-                pass
 
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No chart data to display for this ticker/period.")
+                # dotted / subtle grid
+                fig.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.06)", gridwidth=1, zeroline=False, color="white")
+                fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.06)", gridwidth=1, zeroline=False, color="white")
+
+                # add range selector for UX (1h, 6h, 1d, all)
+                fig.update_xaxes(
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=60, label="1h", step="minute", stepmode="backward"),
+                            dict(count=360, label="6h", step="minute", stepmode="backward"),
+                            dict(count=1, label="1d", step="day", stepmode="backward"),
+                            dict(step="all", label="All")
+                        ]),
+                        bgcolor="#111827",
+                        activecolor="#0ea5a4",
+                    ),
+                    rangeslider=dict(visible=False)
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
 
     # Load models
     with st.spinner("Loading models (transient)..."):
@@ -780,9 +832,11 @@ if run_button:
 
         # before download: append this prediction to history and show history for ticker
         try:
+            # load existing history robustly
             history = load_history()
         except Exception:
             history = pd.DataFrame()
+
         try:
             pred_price = None
             if ticker in aligned_close.columns:
@@ -812,11 +866,20 @@ if run_button:
             'correct': None,
             'checked_at': None
         }
+
+        # robust append: always ensure same columns and use concat
         try:
-            history = history.append(new_row, ignore_index=True) if not history.empty else pd.DataFrame([new_row])
+            if history is None or history.empty:
+                history = pd.DataFrame([new_row])
+            else:
+                # ensure columns exist
+                missing_cols = set(new_row.keys()) - set(history.columns)
+                for mc in missing_cols:
+                    history[mc] = pd.NA
+                history = pd.concat([history, pd.DataFrame([new_row])], ignore_index=True, sort=False)
             save_history(history)
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"Failed to append/save history: {e}")
 
         # show history filtered for this ticker
         try:
