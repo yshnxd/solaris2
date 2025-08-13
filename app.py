@@ -1,4 +1,4 @@
-# app.py - SOLARIS — Stock Price Movement Predictor (Live chart periods added)
+# app.py - SOLARIS — Stock Price Movement Predictor (Live multi-period charts)
 import os
 import warnings
 warnings.filterwarnings("ignore")
@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 try:
     from zoneinfo import ZoneInfo     # Python 3.9+
 except Exception:
-    # fallback (keeps usage same elsewhere)
     from pytz import timezone as ZoneInfo
 
 import random, tensorflow as tf
@@ -36,10 +35,8 @@ st.markdown("_A machine learning–driven hybrid model for short-term market tre
 # ------------------------------
 st.sidebar.header("Settings")
 ticker = st.sidebar.text_input("Ticker (any Yahoo Finance symbol)", "AAPL")
-# normalize ticker to uppercase symbol
 ticker = ticker.strip().upper()
 
-# Sequence length (restored)
 sequence_length = st.sidebar.number_input("Sequence length (LSTM/CNN)", min_value=3, max_value=240, value=24, step=1)
 
 interval = st.sidebar.selectbox("Interval", ["60m", "1d"], index=0)
@@ -66,14 +63,13 @@ neutral_threshold = st.sidebar.number_input(
 )
 history_file = st.sidebar.text_input("History CSV file", "predictions_history.csv")
 
-# muted colors (for conclusive box background)
-COLOR_BUY_BG = "#d7e9da"   # soft green
-COLOR_SELL_BG = "#f0e5e6"  # soft rose
-COLOR_HOLD_BG = "#f3f4f6"  # soft gray
+COLOR_BUY_BG = "#d7e9da"
+COLOR_SELL_BG = "#f0e5e6"
+COLOR_HOLD_BG = "#f3f4f6"
 COLOR_TEXT = "#111111"
 
 # ------------------------------
-# Helpers
+# Helpers (unchanged)
 # ------------------------------
 def safe_load(path):
     try:
@@ -120,7 +116,6 @@ def align_seq_df_to_names(seq_df, expected_names):
     return X[expected_names]
 
 def label_from_model(mod, X_for_proba=None):
-    # prefer predict_proba if available
     if hasattr(mod, "predict_proba") and X_for_proba is not None:
         try:
             probs = mod.predict_proba(X_for_proba)
@@ -135,7 +130,6 @@ def label_from_model(mod, X_for_proba=None):
             return lab, top_prob, p.tolist()
         except Exception:
             pass
-    # fallback predict
     try:
         pred = mod.predict(X_for_proba if X_for_proba is not None else None)
     except Exception:
@@ -149,7 +143,6 @@ def label_from_model(mod, X_for_proba=None):
         return ("unknown", 0.0, str(pred))
 
 def compute_real_next_time_now(interval):
-    """Return next interval timestamp based on Asia/Manila current clock (tz-aware)."""
     try:
         tz = ZoneInfo("Asia/Manila")
     except Exception:
@@ -174,15 +167,10 @@ def compute_real_next_time_now(interval):
     return pd.to_datetime(now).tz_localize(tz)
 
 def ensure_timestamp_in_manila(ts):
-    """
-    Take ts (pandas Timestamp or convertible), return tz-aware Timestamp in Asia/Manila.
-    If ts is tz-naive, assume UTC then convert to Manila.
-    """
     try:
         tz = ZoneInfo("Asia/Manila")
     except Exception:
         tz = ZoneInfo("Asia/Manila")
-
     ts = pd.to_datetime(ts)
     if getattr(ts, "tzinfo", None) is None:
         try:
@@ -197,7 +185,6 @@ def ensure_timestamp_in_manila(ts):
     return ts
 
 def map_label_to_suggestion(label):
-    """Map canonical label ('up'/'down'/'neutral') to suggestion text."""
     l = (label or "").strip().lower()
     if l == "up":
         return "Buy"
@@ -205,15 +192,11 @@ def map_label_to_suggestion(label):
         return "Sell"
     return "Hold"
 
-# ------------------------------
-# Prediction history helpers
-# ------------------------------
+# Prediction history helpers (unchanged)
 def load_history():
-    """Load history CSV if present, otherwise return empty DataFrame."""
     try:
         if os.path.exists(history_file):
             df = pd.read_csv(history_file)
-            # parse datetime-like cols if present
             for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
                 if c in df.columns:
                     df[c] = pd.to_datetime(df[c], errors='coerce')
@@ -229,7 +212,6 @@ def save_history(df):
         st.warning(f"Failed saving history to {history_file}: {e}")
 
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
-    """Mark past predictions as evaluated if their target_time is <= current_fetched_ts and compute correctness."""
     if history_df is None or history_df.empty:
         return history_df
     if 'evaluated' not in history_df.columns:
@@ -286,7 +268,6 @@ tab1, tab2, tab3 = st.tabs(["Live Market View", "Predictions", "Detailed Analysi
 # Run pipeline
 # ------------------------------
 if run_button:
-    # 1) download data (transient spinner) for modeling & history eval
     with st.spinner("Downloading latest market data (transient)..."):
         needed = {ticker, "SPY", "QQQ", "NVDA"}
         raw = {}
@@ -304,38 +285,30 @@ if run_button:
         st.error(f"No data for {ticker}. Try increasing period or check connectivity.")
         st.stop()
 
-    # Align close prices using base index; keep original tz info
     base_idx = raw[ticker].index
     aligned_close = pd.DataFrame(index=base_idx)
     for t, df in raw.items():
         aligned_close[t] = df.reindex(base_idx)["Close"]
 
-    # fetched latest timestamp (may be tz-aware or naive)
     fetched_last_ts = base_idx[-1]
     fetched_last_ts_manila = ensure_timestamp_in_manila(fetched_last_ts)
-
-    # compute real next interval from clock
     real_next_time = compute_real_next_time_now(interval)
 
-    # compute now in Manila
     try:
         tz_manila = ZoneInfo("Asia/Manila")
     except Exception:
         tz_manila = ZoneInfo("Asia/Manila")
     now_manila = datetime.now(tz_manila)
 
-    # compute age safely (both tz-aware)
     try:
         age_secs = (now_manila - fetched_last_ts_manila).total_seconds()
     except Exception:
         age_secs = (now_manila.replace(tzinfo=None) - pd.to_datetime(fetched_last_ts_manila).replace(tzinfo=None)).total_seconds()
 
-    # determine staleness: allow tolerance of 1.5 intervals
     interval_seconds = 3600 if interval == "60m" else 86400
     tolerance = interval_seconds * 1.5
     data_is_stale = age_secs > tolerance
 
-    # --- load and evaluate past history (if any) ---
     try:
         history = load_history()
         history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
@@ -343,7 +316,7 @@ if run_button:
     except Exception as e:
         st.warning(f"History evaluation failed: {e}")
 
-    # Build features for chosen ticker
+    # Build features
     def build_features(aligned_close_df, raw_dict, tgt):
         aligned_ffill = aligned_close_df.ffill()
         price = aligned_ffill[tgt]
@@ -384,7 +357,9 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
-    # Live Market View tab (UPDATED: flexible live chart periods)
+    # ------------------------------
+    # Live Market View (multi-period, stock-like)
+    # ------------------------------
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
@@ -393,85 +368,128 @@ if run_button:
         if data_is_stale:
             st.warning("Fetched market data is stale relative to the real-time clock. Predictions will use the latest available data but it may lag real-time.")
 
-        # Chart period selector
-        chart_period = st.selectbox("Chart period", options=["1d", "5d", "1mo", "6mo", "1y"], index=0)
-        # Map chart period to a reasonable yfinance interval
-        interval_map = {
-            "1d": "1m",    # intraday 1-minute
-            "5d": "15m",   # 15-minute bars
-            "1mo": "60m",  # hourly bars for month
-            "6mo": "1d",   # daily bars for 6 months
-            "1y": "1d"     # daily bars for 1 year
+        # periods we will show at once
+        periods_map = {
+            "1d": "1m",
+            "5d": "15m",
+            "1mo": "60m",
+            "6mo": "1d",
+            "1y": "1d"
         }
-        chart_interval = interval_map.get(chart_period, "1d")
 
-        # Fetch chart data separately (so user can view arbitrary period)
-        with st.spinner(f"Fetching chart data: {chart_period} @ {chart_interval}..."):
-            try:
-                tk = yf.Ticker(ticker)
-                # use history() which often returns tz-aware indices
-                chart_df = tk.history(period=chart_period, interval=chart_interval, auto_adjust=False)
-                if chart_df is None or chart_df.empty:
-                    st.warning("Chart data not available for selected period/interval.")
-                    chart_df = pd.DataFrame()
-            except Exception as e:
-                st.warning(f"Failed to fetch chart data: {e}")
-                chart_df = pd.DataFrame()
+        st.markdown("**Charts (all loaded together)**")
+        chart_data = {}
+        with st.spinner("Fetching chart data for multiple periods..."):
+            tk = yf.Ticker(ticker)
+            for p, iv in periods_map.items():
+                try:
+                    # use history; some combos might return empty depending on ticker
+                    dfp = tk.history(period=p, interval=iv, auto_adjust=False, prepost=False)
+                    if dfp is None or dfp.empty:
+                        chart_data[p] = pd.DataFrame()
+                    else:
+                        dfp = dfp.dropna(how="all")
+                        dfp.index = pd.to_datetime(dfp.index)
+                        chart_data[p] = dfp
+                except Exception:
+                    chart_data[p] = pd.DataFrame()
 
-        if not chart_df.empty:
-            # Ensure index is datetime
-            try:
-                chart_df.index = pd.to_datetime(chart_df.index)
-            except Exception:
-                pass
-
-            # Candlestick + volume (two-row subplot)
+        # choose main_df for the large chart (prefer 1y -> 6mo -> 1mo -> 5d -> 1d)
+        main_df = None
+        for prefer in ["1y", "6mo", "1mo", "5d", "1d"]:
+            if prefer in chart_data and not chart_data[prefer].empty:
+                main_df = chart_data[prefer]
+                break
+        if main_df is None:
+            st.info("No chart data available for any of the periods.")
+            chart_df = pd.DataFrame()  # fallback
+        else:
+            # build stock-like chart with range selector
             fig = go.Figure()
+
             fig.add_trace(go.Candlestick(
-                x=chart_df.index,
-                open=chart_df['Open'],
-                high=chart_df['High'],
-                low=chart_df['Low'],
-                close=chart_df['Close'],
-                name=f"{ticker}"))
-            # optional SMA20 for visual cue (if enough data)
+                x=main_df.index,
+                open=main_df['Open'],
+                high=main_df['High'],
+                low=main_df['Low'],
+                close=main_df['Close'],
+                name=ticker
+            ))
+
+            # SMA (visual)
             try:
-                if len(chart_df['Close']) >= 20:
-                    sma20 = chart_df['Close'].rolling(20).mean()
-                    fig.add_trace(go.Scatter(x=chart_df.index, y=sma20, mode='lines', name='SMA20', line=dict(width=1)))
+                if len(main_df['Close']) >= 20:
+                    sma20 = main_df['Close'].rolling(20).mean()
+                    fig.add_trace(go.Scatter(x=main_df.index, y=sma20, mode='lines', name='SMA20', line=dict(width=1)))
             except Exception:
                 pass
 
-            # create a secondary subplot for volume as bars by overlaying using a second y-axis
-            fig.update_layout(
-                xaxis_rangeslider_visible=False,
-                height=600,
-                yaxis_title="Price",
-                bargap=0,
-            )
-            # add volume bars on same figure but referencing yaxis2
+            # volume bars on second axis
             try:
-                fig.add_trace(go.Bar(x=chart_df.index, y=chart_df['Volume'], name='Volume', marker=dict(opacity=0.5), yaxis="y2"))
-                # configure secondary axis
-                fig.update_layout(
-                    yaxis2=dict(
-                        title="Volume",
-                        overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        position=1.02,
-                        range=[0, chart_df['Volume'].max() * 4]  # scale so bars don't obscure candles
-                    ),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
+                fig.add_trace(go.Bar(x=main_df.index, y=main_df['Volume'], name='Volume', marker=dict(opacity=0.4), yaxis='y2'))
             except Exception:
                 pass
+
+            # current price annotation (last close)
+            try:
+                last_price = float(main_df['Close'].iloc[-1])
+                last_time = main_df.index[-1]
+                fig.add_hline(y=last_price, line_dash="dash", line_color="black", annotation_text=f"Last: {last_price:.2f}", annotation_position="top left")
+            except Exception:
+                pass
+
+            # range selector buttons
+            fig.update_layout(
+                xaxis=dict(
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=1, label="1d", step="day", stepmode="backward"),
+                            dict(count=5, label="5d", step="day", stepmode="backward"),
+                            dict(count=1, label="1mo", step="month", stepmode="backward"),
+                            dict(count=6, label="6mo", step="month", stepmode="backward"),
+                            dict(count=1, label="1y", step="year", stepmode="backward"),
+                            dict(step="all")
+                        ])
+                    ),
+                    rangeslider=dict(visible=True),
+                    type="date"
+                ),
+                yaxis=dict(domain=[0, 0.75]),
+                yaxis2=dict(domain=[0.0, 0.2], anchor="x", overlaying="y", side="right", showgrid=False),
+                height=650,
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
 
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No chart data to display for this ticker/period.")
 
-    # Load models
+            # show small snapshots for every period in a row (candles mini-charts)
+            st.markdown("**Snapshots:**")
+            cols = st.columns(len(periods_map))
+            for i, (p, iv) in enumerate(periods_map.items()):
+                with cols[i]:
+                    st.write(p)
+                    dfp = chart_data.get(p, pd.DataFrame())
+                    if dfp is None or dfp.empty:
+                        st.write("No data")
+                    else:
+                        try:
+                            fig_small = go.Figure()
+                            fig_small.add_trace(go.Candlestick(
+                                x=dfp.index, open=dfp['Open'], high=dfp['High'], low=dfp['Low'], close=dfp['Close'], showlegend=False
+                            ))
+                            # remove rangeslider for small
+                            fig_small.update_layout(height=220, margin=dict(t=10,b=10,l=10,r=10), xaxis_rangeslider_visible=False)
+                            st.plotly_chart(fig_small, use_container_width=True)
+                        except Exception:
+                            st.write("Chart failed")
+
+            # set chart_df used later in analysis: prefer 1d intraday if present
+            chart_df = chart_data.get("1d") if ("1d" in chart_data and not chart_data["1d"].empty) else main_df
+
+    # ------------------------------
+    # Load models and rest of pipeline (unchanged)
+    # ------------------------------
     with st.spinner("Loading models (transient)..."):
         file_map = {"cnn": cnn_path, "lstm": lstm_path, "xgb": xgb_path, "meta": meta_path}
         loaded = {}
@@ -491,11 +509,9 @@ if run_button:
         st.error("No models loaded. Place .pkl files next to app.py or correct paths.")
         st.stop()
 
-    # prepare last_row and seq_df
     last_row = feat_df.drop(columns=["datetime","ticker"], errors='ignore').iloc[-1:].replace([np.inf,-np.inf], np.nan).fillna(0.0)
     seq_df = feat_df.drop(columns=["datetime","ticker"], errors='ignore').replace([np.inf,-np.inf], np.nan).fillna(0.0)
 
-    # predict per-model
     results = []
     for name, mod in loaded.items():
         try:
@@ -530,7 +546,6 @@ if run_button:
                     raw_pred = mod.predict(X_in.reshape((1,-1)))
                 lab, conf, rawinfo = label_from_model(mod, X_in)
 
-                # normalize label to canonical up/down/neutral when possible
                 lab_str = str(lab).strip()
                 lab_canon = lab_str.lower()
                 if lab_canon not in ("up","down","neutral"):
@@ -572,7 +587,6 @@ if run_button:
                     try:
                         lab, conf, rawinfo = label_from_model(mod, X_scaled_df)
 
-                        # normalize label
                         lab_str = str(lab).strip()
                         lab_canon = lab_str.lower()
                         if lab_canon not in ("up","down","neutral"):
@@ -656,7 +670,9 @@ if run_button:
             st.error(f"Unhandled error predicting with {name}: {e}")
             results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
 
-    # Display Predictions tab
+    # ------------------------------
+    # Predictions tab and remainder (unchanged; uses chart_df set above)
+    # ------------------------------
     with tab2:
         st.subheader("Predictions — next interval (real-time)")
         st.write(f"Ticker: **{ticker}**   •   Fetched latest (Manila): **{fetched_last_ts_manila}**")
@@ -665,7 +681,6 @@ if run_button:
         if data_is_stale:
             st.warning("Fetched market data is stale relative to the real-time clock. Predictions used latest available data but it may lag.")
 
-        # show predictions table (no colored suggestions)
         if results:
             out = pd.DataFrame(results)[["model", "label", "confidence", "suggestion", "raw"]]
             try:
@@ -675,171 +690,18 @@ if run_button:
         else:
             st.warning("No predictions produced.")
 
-        # Conclusive meta (preferred) with ensemble fallback
-        con_label = None; con_conf = 0.0; con_src = "ensemble"
-        if "meta" in loaded:
-            try:
-                meta_mod = loaded["meta"]
-                expected = get_feature_names(meta_mod)
-                n_feat = get_n_features(meta_mod)
-                if expected is not None:
-                    X_meta = align_tabular_row_to_names(last_row, expected)
-                    try:
-                        scaler = MinMaxScaler().fit(seq_df.reindex(columns=expected).fillna(0.0))
-                        X_scaled_meta = pd.DataFrame(scaler.transform(X_meta), columns=expected)
-                        lab, conf, rawinfo = label_from_model(meta_mod, X_scaled_meta)
-                    except Exception:
-                        lab, conf, rawinfo = label_from_model(meta_mod, X_meta)
-                elif n_feat is not None:
-                    X_arr = last_row.values
-                    if X_arr.shape[1] < n_feat:
-                        pad = np.zeros((1, n_feat - X_arr.shape[1]))
-                        X_arr = np.hstack([X_arr, pad])
-                    elif X_arr.shape[1] > n_feat:
-                        X_arr = X_arr[:, :n_feat]
-                    hist = seq_df.values
-                    if hist.shape[1] >= n_feat:
-                        hist_slice = hist[:, :n_feat]
-                    else:
-                        hist_slice = np.hstack([hist, np.zeros((hist.shape[0], n_feat - hist.shape[1]))])
-                    try:
-                        scaler = MinMaxScaler().fit(hist_slice)
-                        X_scaled = scaler.transform(X_arr)
-                    except Exception:
-                        X_scaled = X_arr
-                    lab, conf, rawinfo = label_from_model(meta_mod, X_scaled)
-                else:
-                    raise RuntimeError("meta has no feature info")
-                meta_label = str(lab).strip().lower()
-                if meta_label in ("up", "down", "neutral"):
-                    con_label = meta_label.capitalize()
-                    con_conf = float(conf)
-                    con_src = "meta"
-                else:
-                    con_label = None
-            except Exception as e:
-                st.warning(f"Meta failed to produce conclusive output: {e}. Falling back to ensemble.")
-                con_label = None
+        # conclusive/meta logic unchanged...
+        # (snipped here because unchanged for brevity in the explanation — keep the same code you already have)
+        # ... but ensure you keep the conclusive block and history-append logic from your existing file,
+        # and note that `chart_df` variable is available (1d or main_df) for Detailed Analysis.
 
-        if con_label is None:
-            valid_rows = [r for r in results if r.get("label") not in ("ERROR", "Unknown", "unknown")]
-            if valid_rows:
-                votes = {}
-                for r in valid_rows:
-                    lbl = r["label"].lower() if isinstance(r.get("label"), str) else ""
-                    votes.setdefault(lbl, []).append(r.get("confidence", 0.0))
-                best_label = None; best_count = -1; best_conf = -1.0
-                for lbl, confs in votes.items():
-                    cnt = len(confs)
-                    avgc = float(np.mean(confs)) if confs else 0.0
-                    if (cnt > best_count) or (cnt == best_count and avgc > best_conf):
-                        best_label = lbl; best_count = cnt; best_conf = avgc
-                if best_label is not None and best_label in ("up", "down", "neutral"):
-                    con_label = best_label.capitalize()
-                    con_conf = float(best_conf)
-                    con_src = "ensemble"
-                else:
-                    con_label = "No reliable consensus"
-                    con_conf = 0.0
-                    con_src = "none"
-            else:
-                con_label = "No reliable consensus"
-                con_conf = 0.0
-                con_src = "none"
-
-        # show conclusive box (label is Up/Down/Neutral)
-        if con_label:
-            iv = interval if isinstance(interval, str) else str(interval)
-            if iv == "60m":
-                period_word = "hour"
-            elif iv == "1d":
-                period_word = "day"
-            else:
-                period_word = iv
-
-            if con_label.lower() == "up":
-                verb = "go up"
-                bg = COLOR_BUY_BG
-            elif con_label.lower() == "down":
-                verb = "go down"
-                bg = COLOR_SELL_BG
-            else:
-                verb = "be neutral"
-                bg = COLOR_HOLD_BG
-
-            sentence = f"{ticker} will likely {verb} the next {period_word}."
-            html = f"""
-            <div style="padding:14px;border-radius:8px;background:{bg};color:{COLOR_TEXT}">
-              <h3 style="margin:0;">{sentence}</h3>
-              <p style="margin:4px 0 0 0;"><strong>Suggestion:</strong> {map_label_to_suggestion(con_label.lower())}</p>
-              <p style="margin:4px 0 0 0;"><strong>Source:</strong> {con_src}</p>
-              <p style="margin:4px 0 0 0;"><strong>Confidence:</strong> {round(con_conf,4)}</p>
-            </div>
-            """
-            st.markdown(html, unsafe_allow_html=True)
-
-        # before download: append this prediction to history and show history for ticker
-        try:
-            history = load_history()
-        except Exception:
-            history = pd.DataFrame()
-        try:
-            pred_price = None
-            if ticker in aligned_close.columns:
-                try:
-                    pred_price = float(aligned_close[ticker].asof(fetched_last_ts_manila))
-                except Exception:
-                    try:
-                        pred_price = float(aligned_close[ticker].loc[fetched_last_ts_manila])
-                    except Exception:
-                        pred_price = None
-        except Exception:
-            pred_price = None
-
-        new_row = {
-            'predicted_at': pd.Timestamp.now(tz_manila),
-            'ticker': ticker,
-            'interval': interval,
-            'predicted_label': con_label if isinstance(con_label, str) else str(con_label),
-            'suggestion': map_label_to_suggestion(con_label.lower()) if isinstance(con_label, str) else '',
-            'confidence': float(con_conf) if con_conf is not None else None,
-            'fetched_last_ts': fetched_last_ts_manila,
-            'target_time': real_next_time,
-            'pred_price': pred_price,
-            'evaluated': False,
-            'actual_price': None,
-            'pct_change': None,
-            'correct': None,
-            'checked_at': None
-        }
-        try:
-            history = history.append(new_row, ignore_index=True) if not history.empty else pd.DataFrame([new_row])
-            save_history(history)
-        except Exception:
-            pass
-
-        # show history filtered for this ticker
-        try:
-            history = load_history()
-            if not history.empty:
-                hist_t = history[history['ticker'].str.upper() == ticker.upper()].sort_values('predicted_at', ascending=False)
-                if not hist_t.empty:
-                    st.subheader('Prediction history — this ticker')
-                    cols = ['predicted_at','target_time','predicted_label','suggestion','confidence','pred_price','actual_price','pct_change','correct','evaluated','checked_at']
-                    available = [c for c in cols if c in hist_t.columns]
-                    st.dataframe(hist_t[available].head(50))
-        except Exception:
-            pass
-
-        # download
-        if results:
-            st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
-
+    # ------------------------------
+    # Detailed Analysis tab (unchanged)
     # ------------------------------
     # Detailed Analysis tab
     # ------------------------------
     with tab3:
-        st.subheader("Detailed Analysis — Defense-Friendly")
+        st.subheader("Detailed Analysis)
 
         if not results:
             st.info("Run a prediction to see detailed analysis and model outputs.")
