@@ -8,3 +8,4 @@ scikit-learn
 joblib
 pytz
 tensorflow
+xgboost
