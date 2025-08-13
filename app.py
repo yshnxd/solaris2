@@ -46,7 +46,6 @@ ticker = ticker.strip().upper()
 interval = st.sidebar.selectbox("Interval", ["60m", "1d"], index=0)
 period_default = "2d" if interval == "60m" else "90d"
 period = st.sidebar.text_input("Period (e.g., 2d for intraday, 90d)", period_default)
-sequence_length = st.sidebar.number_input("Sequence length (LSTM/CNN)", min_value=3, max_value=240, value=24, step=1)
 
 st.sidebar.markdown("---")
 st.sidebar.write("Model files (relative to app.py):")
@@ -298,7 +297,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
 # ------------------------------
 # Tabs
 # ------------------------------
-tab1, tab2 = st.tabs(["Live Market View", "Predictions"])
+tab1, tab2, tab3 = st.tabs(["Live Market View", "Predictions", "Detailed Analysis"]) 
 
 # ------------------------------
 # Run pipeline
@@ -808,3 +807,69 @@ if run_button:
         # download
         if results:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
+
+        # ------------------------------
+        # Detailed Analysis tab
+        # ------------------------------
+        with tab3:
+            st.subheader("Detailed Analysis")
+            if not results:
+                st.info("Run a prediction to see detailed analysis and model metadata.")
+            else:
+                st.markdown("### Per-model information")
+                for name, mod in loaded.items():
+                    st.markdown(f"**Model:** {name}")
+                    try:
+                        fnames = get_feature_names(mod)
+                        nfeat = get_n_features(mod)
+                        st.write(f"Known features: {len(fnames) if fnames is not None else 'unknown'}; n_features_in_: {nfeat}")
+                        if fnames is not None:
+                            st.write(fnames[:50])
+                    except Exception:
+                        pass
+
+                    # feature importances if present
+                    try:
+                        if hasattr(mod, 'feature_importances_'):
+                            fi = getattr(mod, 'feature_importances_')
+                            fi_names = fnames if fnames else [f"f{i}" for i in range(len(fi))]
+                            df_fi = pd.DataFrame({'feature':fi_names, 'importance':fi}).sort_values('importance', ascending=False)
+                            st.markdown("**Top feature importances**")
+                            st.dataframe(df_fi.head(50))
+                        elif hasattr(mod, 'coef_'):
+                            coefs = np.ravel(getattr(mod, 'coef_'))
+                            coef_names = fnames if fnames else [f"f{i}" for i in range(len(coefs))]
+                            df_coef = pd.DataFrame({'feature':coef_names, 'coef':coefs}).sort_values('coef', ascending=False)
+                            st.markdown("**Top coefficients**")
+                            st.dataframe(df_coef.head(50))
+                    except Exception:
+                        pass
+
+                # model agreement
+                st.markdown("### Model agreement")
+                votes = {}
+                for r in results:
+                    lbl = r.get('label','').lower()
+                    votes[lbl] = votes.get(lbl, 0) + 1
+                vote_df = pd.DataFrame(list(votes.items()), columns=['label','count'])
+                if not vote_df.empty:
+                    try:
+                        st.bar_chart(vote_df.set_index('label'))
+                    except Exception:
+                        st.dataframe(vote_df)
+
+                # history accuracy
+                try:
+                    history = load_history()
+                    if not history.empty:
+                        st.markdown("### History accuracy summary")
+                        evald = history[history['correct'].notna()]
+                        if not evald.empty:
+                            acc = evald['correct'].mean()
+                            st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
+                            per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
+                            st.dataframe(per)
+                        else:
+                            st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
+                except Exception:
+                    pass
