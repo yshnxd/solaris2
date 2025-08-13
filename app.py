@@ -32,13 +32,17 @@ random.seed(SEED)
 tf.random.set_seed(SEED)
 
 st.set_page_config(page_title="Solaris Reborn — Real-time Next-Hour", layout="wide")
-st.title("🌞 Solaris Reborn — Real-time Next-Hour Prediction")
+st.title("SOLARIS — Stock Price Movement Predictor")
+st.markdown("_A machine learning–driven hybrid model for short-term market trend forecasting_")
+
 
 # ------------------------------
 # Sidebar
 # ------------------------------
 st.sidebar.header("Settings")
 ticker = st.sidebar.text_input("Ticker (any Yahoo Finance symbol)", "AAPL")
+# normalize ticker to uppercase symbol
+ticker = ticker.strip().upper()
 interval = st.sidebar.selectbox("Interval", ["60m", "1d"], index=0)
 period_default = "2d" if interval == "60m" else "90d"
 period = st.sidebar.text_input("Period (e.g., 2d for intraday, 90d)", period_default)
@@ -57,6 +61,8 @@ label_map = [s.strip().lower() for s in label_map_input.split(",")]
 prob_threshold = st.sidebar.slider("Prob threshold for confident class", 0.05, 0.95, 0.5, 0.05)
 models_to_run = st.sidebar.multiselect("Models to run", ["cnn", "lstm", "xgb", "meta"], default=["cnn", "lstm", "xgb", "meta"])
 run_button = st.sidebar.button("Fetch live data & predict NEXT interval (real-time)")
+neutral_threshold = st.sidebar.number_input("Neutral threshold (abs % move to call 'Neutral')", min_value=0.0, max_value=0.1, value=0.002, step=0.0005, format="%.4f")
+history_file = st.sidebar.text_input("History CSV file", "predictions_history.csv")
 
 # muted colors (subtle)
 COLOR_BUY_BG = "#d7e9da"   # soft green
@@ -209,6 +215,87 @@ def map_label_to_suggestion(label):
     return "Hold"  # neutral or anything else
 
 # ------------------------------
+# Prediction history helpers
+# ------------------------------
+
+def load_history():
+    """Load history CSV if present, otherwise return empty DataFrame."""
+    try:
+        if os.path.exists(history_file):
+            df = pd.read_csv(history_file)
+            # try parsing known datetime cols
+            for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
+                if c in df.columns:
+                    df[c] = pd.to_datetime(df[c], errors='coerce')
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+
+def save_history(df):
+    try:
+        df.to_csv(history_file, index=False)
+    except Exception as e:
+        st.warning(f"Failed saving history to {history_file}: {e}")
+
+
+def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
+    """Mark past predictions as evaluated if their target_time is <= current_fetched_ts and compute correctness."""
+    if history_df is None or history_df.empty:
+        return history_df
+    # ensure columns
+    if 'evaluated' not in history_df.columns:
+        history_df['evaluated'] = False
+    history_df['target_time'] = pd.to_datetime(history_df['target_time'], errors='coerce')
+    now_ts = pd.to_datetime(current_fetched_ts)
+    # iterate rows needing evaluation
+    mask = (~history_df['evaluated'].astype(bool)) & (history_df['target_time'].notna()) & (history_df['target_time'] <= now_ts)
+    for idx in history_df[mask].index:
+        try:
+            row = history_df.loc[idx]
+            t_target = pd.to_datetime(row['target_time'])
+            # get price series for ticker
+            tk = str(row.get('ticker', '')).upper()
+            if tk not in aligned_close_df.columns:
+                # cannot evaluate without price series
+                continue
+            series = aligned_close_df[tk].dropna()
+            if series.empty:
+                continue
+            # pred price at fetched_last_ts recorded in history (if available), else use price just before prediction time
+            try:
+                pred_price = float(row['pred_price']) if pd.notna(row.get('pred_price')) else float(series.asof(pd.to_datetime(row['fetched_last_ts'])))
+            except Exception:
+                pred_price = None
+            try:
+                actual_price = float(series.asof(t_target))
+            except Exception:
+                actual_price = None
+            if pred_price is None or actual_price is None or pred_price == 0:
+                # cannot evaluate
+                continue
+            pct = (actual_price - pred_price) / pred_price
+            pred_label = str(row.get('predicted_label', '')).strip().lower()
+            thr = float(neutral_threshold)
+            correct = False
+            if pred_label == 'up' and pct > 0:
+                correct = True
+            elif pred_label == 'down' and pct < 0:
+                correct = True
+            elif pred_label == 'neutral' and abs(pct) <= thr:
+                correct = True
+            history_df.at[idx, 'evaluated'] = True
+            history_df.at[idx, 'pred_price'] = pred_price
+            history_df.at[idx, 'actual_price'] = actual_price
+            history_df.at[idx, 'pct_change'] = pct
+            history_df.at[idx, 'correct'] = bool(correct)
+            history_df.at[idx, 'checked_at'] = pd.Timestamp.now()
+        except Exception:
+            continue
+    return history_df
+
+# ------------------------------
 # Tabs
 # ------------------------------
 tab1, tab2 = st.tabs(["Live Market View", "Predictions"])
@@ -267,6 +354,16 @@ if run_button:
     interval_seconds = 3600 if interval == "60m" else 86400
     tolerance = interval_seconds * 1.5
     data_is_stale = age_secs > tolerance
+
+    # --- load and evaluate past history (if any) ---
+    try:
+        history = load_history()
+        history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
+        save_history(history)
+    except Exception as e:
+        # non-fatal
+        st.warning(f"History evaluation failed: {e}")
+
 
     # Build features for chosen ticker
     def build_features(aligned_close_df, raw_dict, tgt):
@@ -653,6 +750,60 @@ if run_button:
             </div>
             """
             st.markdown(html, unsafe_allow_html=True)
+
+        # before download: append this prediction to history and show history for ticker
+        try:
+            history = load_history()
+        except Exception:
+            history = pd.DataFrame()
+        try:
+            pred_price = None
+            if ticker in aligned_close.columns:
+                try:
+                    pred_price = float(aligned_close[ticker].asof(fetched_last_ts_manila))
+                except Exception:
+                    try:
+                        pred_price = float(aligned_close[ticker].loc[fetched_last_ts_manila])
+                    except Exception:
+                        pred_price = None
+        except Exception:
+            pred_price = None
+
+        new_row = {
+            'predicted_at': pd.Timestamp.now(tz_manila),
+            'ticker': ticker,
+            'interval': interval,
+            'predicted_label': con_label if isinstance(con_label, str) else str(con_label),
+            'suggestion': map_label_to_suggestion(con_label.lower()) if isinstance(con_label, str) else '',
+            'confidence': float(con_conf) if con_conf is not None else None,
+            'fetched_last_ts': fetched_last_ts_manila,
+            'target_time': real_next_time,
+            'pred_price': pred_price,
+            'evaluated': False,
+            'actual_price': None,
+            'pct_change': None,
+            'correct': None,
+            'checked_at': None
+        }
+        try:
+            history = history.append(new_row, ignore_index=True) if not history.empty else pd.DataFrame([new_row])
+            save_history(history)
+        except Exception:
+            pass
+
+        # show history filtered for this ticker
+        try:
+            history = load_history()
+            if not history.empty:
+                hist_t = history[history['ticker'].str.upper() == ticker.upper()].sort_values('predicted_at', ascending=False)
+                if not hist_t.empty:
+                    st.subheader('Prediction history — this ticker')
+                    # pick useful columns to display
+                    cols = ['predicted_at','target_time','predicted_label','suggestion','confidence','pred_price','actual_price','pct_change','correct','evaluated','checked_at']
+                    available = [c for c in cols if c in hist_t.columns]
+                    st.dataframe(hist_t[available].head(50))
+        except Exception:
+            pass
 
         # download
         if results:
