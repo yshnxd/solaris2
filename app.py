@@ -701,8 +701,8 @@ if run_button:
     # Detailed Analysis tab
     # ------------------------------
     with tab3:
-        st.subheader("Detailed Analysis)
-
+        st.subheader("Detailed Analysis — Defense-Friendly")
+        
         if not results:
             st.info("Run a prediction to see detailed analysis and model outputs.")
         else:
