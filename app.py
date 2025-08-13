@@ -38,7 +38,7 @@ st.title("🌞 Solaris Reborn — Real-time Next-Hour Prediction")
 # Sidebar
 # ------------------------------
 st.sidebar.header("Settings")
-ticker = st.sidebar.selectbox("Ticker", ["AAPL", "SPY", "TSLA", "NVDA", "QQQ"], index=0)
+ticker = st.sidebar.text_input("Ticker (any Yahoo Finance symbol)", "AAPL")
 interval = st.sidebar.selectbox("Interval", ["60m", "1d"], index=0)
 period_default = "2d" if interval == "60m" else "90d"
 period = st.sidebar.text_input("Period (e.g., 2d for intraday, 90d)", period_default)
@@ -541,14 +541,9 @@ if run_button:
         if results:
             out = pd.DataFrame(results)[["model", "label", "confidence", "suggestion", "raw"]]
 
-            def color_suggestion(v):
-                if v == "Buy": return f"background-color:{COLOR_BUY_BG}"
-                if v == "Sell": return f"background-color:{COLOR_SELL_BG}"
-                if v == "Hold": return f"background-color:{COLOR_HOLD_BG}"
-                return ""
-
+            # display without colored suggestions
             try:
-                st.dataframe(out.style.applymap(color_suggestion, subset=["suggestion"]))
+                st.dataframe(out)
             except Exception:
                 st.dataframe(out)
         else:
@@ -629,17 +624,30 @@ if run_button:
 
         # show conclusive box (label is Up/Down/Neutral)
         if con_label:
-            suggestion = map_label_to_suggestion(con_label.lower()) if isinstance(con_label, str) else "Hold"
+            # determine a human-friendly period word based on interval
+            iv = interval if isinstance(interval, str) else str(interval)
+            if iv == "60m":
+                period_word = "hour"
+            elif iv == "1d":
+                period_word = "day"
+            else:
+                period_word = iv
+
             if con_label.lower() == "up":
+                verb = "go up"
                 bg = COLOR_BUY_BG
             elif con_label.lower() == "down":
+                verb = "go down"
                 bg = COLOR_SELL_BG
             else:
+                verb = "be neutral"
                 bg = COLOR_HOLD_BG
+
+            sentence = f"{ticker} will likely {verb} the next {period_word}."
             html = f"""
             <div style="padding:14px;border-radius:8px;background:{bg};color:{COLOR_TEXT}">
-              <h3 style="margin:0;">CONCLUSIVE: {con_label}</h3>
-              <p style="margin:4px 0 0 0;"><strong>Suggestion:</strong> {suggestion}</p>
+              <h3 style="margin:0;">{sentence}</h3>
+              <p style="margin:4px 0 0 0;"><strong>Suggestion:</strong> {map_label_to_suggestion(con_label.lower())}</p>
               <p style="margin:4px 0 0 0;"><strong>Source:</strong> {con_src}</p>
               <p style="margin:4px 0 0 0;"><strong>Confidence:</strong> {round(con_conf,4)}</p>
             </div>
