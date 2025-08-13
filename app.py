@@ -1,4 +1,4 @@
-# app.py - SOLARIS — Stock Price Movement Predictor
+# app.py - SOLARIS — Stock Price Movement Predictor (Live chart periods added)
 import os
 import warnings
 warnings.filterwarnings("ignore")
@@ -286,7 +286,7 @@ tab1, tab2, tab3 = st.tabs(["Live Market View", "Predictions", "Detailed Analysi
 # Run pipeline
 # ------------------------------
 if run_button:
-    # 1) download data (transient spinner)
+    # 1) download data (transient spinner) for modeling & history eval
     with st.spinner("Downloading latest market data (transient)..."):
         needed = {ticker, "SPY", "QQQ", "NVDA"}
         raw = {}
@@ -384,7 +384,7 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
-    # Live Market View tab
+    # Live Market View tab (UPDATED: flexible live chart periods)
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
@@ -393,31 +393,83 @@ if run_button:
         if data_is_stale:
             st.warning("Fetched market data is stale relative to the real-time clock. Predictions will use the latest available data but it may lag real-time.")
 
-        # Candlestick
-        df_plot = raw[ticker].copy().dropna()
-        close_series = df_plot["Close"].squeeze() if isinstance(df_plot["Close"], pd.DataFrame) else df_plot["Close"]
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=df_plot.index, open=df_plot["Open"], high=df_plot["High"], low=df_plot["Low"], close=df_plot["Close"], name=f"{ticker}"
-        ))
-        if "Close" in df_plot.columns:
-            sma20 = close_series.rolling(20).mean()
-            fig.add_trace(go.Scatter(x=df_plot.index, y=sma20, mode="lines", name="SMA20", line=dict(width=1)))
-        fig.update_layout(height=600, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+        # Chart period selector
+        chart_period = st.selectbox("Chart period", options=["1d", "5d", "1mo", "6mo", "1y"], index=0)
+        # Map chart period to a reasonable yfinance interval
+        interval_map = {
+            "1d": "1m",    # intraday 1-minute
+            "5d": "15m",   # 15-minute bars
+            "1mo": "60m",  # hourly bars for month
+            "6mo": "1d",   # daily bars for 6 months
+            "1y": "1d"     # daily bars for 1 year
+        }
+        chart_interval = interval_map.get(chart_period, "1d")
 
-        # Indicators
-        st.markdown("**Indicators used:** RSI (14), MACD")
-        try:
-            rsi = ta.momentum.RSIIndicator(close_series, window=14).rsi()
-            macd = ta.trend.MACD(close_series)
-            macd_line = macd.macd(); macd_signal = macd.macd_signal()
-            fig2 = go.Figure(); fig2.add_trace(go.Scatter(x=df_plot.index, y=rsi, name="RSI(14)")); fig2.update_layout(height=250)
-            st.plotly_chart(fig2, use_container_width=True)
-            fig3 = go.Figure(); fig3.add_trace(go.Scatter(x=df_plot.index, y=macd_line, name="MACD")); fig3.add_trace(go.Scatter(x=df_plot.index, y=macd_signal, name="MACD sig")); fig3.update_layout(height=250)
-            st.plotly_chart(fig3, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Indicator plotting failed: {e}")
+        # Fetch chart data separately (so user can view arbitrary period)
+        with st.spinner(f"Fetching chart data: {chart_period} @ {chart_interval}..."):
+            try:
+                tk = yf.Ticker(ticker)
+                # use history() which often returns tz-aware indices
+                chart_df = tk.history(period=chart_period, interval=chart_interval, auto_adjust=False)
+                if chart_df is None or chart_df.empty:
+                    st.warning("Chart data not available for selected period/interval.")
+                    chart_df = pd.DataFrame()
+            except Exception as e:
+                st.warning(f"Failed to fetch chart data: {e}")
+                chart_df = pd.DataFrame()
+
+        if not chart_df.empty:
+            # Ensure index is datetime
+            try:
+                chart_df.index = pd.to_datetime(chart_df.index)
+            except Exception:
+                pass
+
+            # Candlestick + volume (two-row subplot)
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(
+                x=chart_df.index,
+                open=chart_df['Open'],
+                high=chart_df['High'],
+                low=chart_df['Low'],
+                close=chart_df['Close'],
+                name=f"{ticker}"))
+            # optional SMA20 for visual cue (if enough data)
+            try:
+                if len(chart_df['Close']) >= 20:
+                    sma20 = chart_df['Close'].rolling(20).mean()
+                    fig.add_trace(go.Scatter(x=chart_df.index, y=sma20, mode='lines', name='SMA20', line=dict(width=1)))
+            except Exception:
+                pass
+
+            # create a secondary subplot for volume as bars by overlaying using a second y-axis
+            fig.update_layout(
+                xaxis_rangeslider_visible=False,
+                height=600,
+                yaxis_title="Price",
+                bargap=0,
+            )
+            # add volume bars on same figure but referencing yaxis2
+            try:
+                fig.add_trace(go.Bar(x=chart_df.index, y=chart_df['Volume'], name='Volume', marker=dict(opacity=0.5), yaxis="y2"))
+                # configure secondary axis
+                fig.update_layout(
+                    yaxis2=dict(
+                        title="Volume",
+                        overlaying="y",
+                        side="right",
+                        showgrid=False,
+                        position=1.02,
+                        range=[0, chart_df['Volume'].max() * 4]  # scale so bars don't obscure candles
+                    ),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+            except Exception:
+                pass
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No chart data to display for this ticker/period.")
 
     # Load models
     with st.spinner("Loading models (transient)..."):
@@ -855,20 +907,21 @@ if run_button:
             # --- 3) Key Technical Indicators Used ---
             st.markdown("### 3) Key Technical Indicators (latest values)")
             try:
-                last_idx = df_plot.index[-1]
+                last_idx = chart_df.index[-1] if 'chart_df' in locals() and not chart_df.empty else None
                 indicators = {}
                 try:
-                    indicators['Close'] = float(df_plot['Close'].iloc[-1])
+                    indicators['Close'] = float(chart_df['Close'].iloc[-1]) if last_idx is not None else None
                 except Exception:
                     indicators['Close'] = None
                 try:
-                    indicators['RSI(14)'] = float(ta.momentum.RSIIndicator(close_series, window=14).rsi().iloc[-1])
+                    indicators['RSI(14)'] = float(ta.momentum.RSIIndicator(chart_df['Close'], window=14).rsi().iloc[-1]) if last_idx is not None else None
                 except Exception:
                     indicators['RSI(14)'] = None
                 try:
-                    macd = ta.trend.MACD(close_series)
-                    indicators['MACD'] = float(macd.macd().iloc[-1])
-                    indicators['MACD_signal'] = float(macd.macd_signal().iloc[-1])
+                    macd = ta.trend.MACD(chart_df['Close']) if last_idx is not None else None
+                    if macd is not None:
+                        indicators['MACD'] = float(macd.macd().iloc[-1])
+                        indicators['MACD_signal'] = float(macd.macd_signal().iloc[-1])
                 except Exception:
                     indicators['MACD'] = indicators.get('MACD', None)
                 for k,v in indicators.items():
@@ -895,7 +948,6 @@ if run_button:
                         st.dataframe(df_coef.head(50))
                         shown = True
                 if not shown:
-                    # try to show for any model
                     for name, mod in loaded.items():
                         if hasattr(mod, 'feature_importances_'):
                             fi = getattr(mod, 'feature_importances_')
