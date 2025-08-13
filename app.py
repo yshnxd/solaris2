@@ -1,4 +1,4 @@
-# app.py - Solaris Reborn (Real-time next-hour predictions; proper timezone handling)
+# app.py - Solaris Reborn (Real-time Next-Hour Prediction)
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -74,6 +74,7 @@ def safe_load(path):
         st.warning(f"Failed to load {path}: {e}")
         return None
 
+
 def get_feature_names(mod):
     f = getattr(mod, "feature_names_in_", None)
     if f is not None:
@@ -82,6 +83,7 @@ def get_feature_names(mod):
     if alt is not None:
         return list(alt)
     return None
+
 
 def get_n_features(mod):
     n = getattr(mod, "n_features_in_", None)
@@ -95,11 +97,13 @@ def get_n_features(mod):
             pass
     return None
 
+
 def align_tabular_row_to_names(last_row_df, expected_names):
     out = pd.DataFrame(index=[0])
     for nm in expected_names:
         out[nm] = last_row_df.iloc[0][nm] if nm in last_row_df.columns else 0.0
     return out
+
 
 def align_seq_df_to_names(seq_df, expected_names):
     X = seq_df.copy()
@@ -110,6 +114,7 @@ def align_seq_df_to_names(seq_df, expected_names):
     if extra:
         X = X.drop(columns=extra)
     return X[expected_names]
+
 
 def label_from_model(mod, X_for_proba=None):
     # prefer predict_proba if available
@@ -136,6 +141,7 @@ def label_from_model(mod, X_for_proba=None):
         return lab, 1.0, int(v)
     except Exception:
         return ("unknown", 0.0, str(pred))
+
 
 def compute_real_next_time_now(interval):
     """Return next interval timestamp based on Asia/Manila current clock (tz-aware)."""
@@ -166,6 +172,7 @@ def compute_real_next_time_now(interval):
             pass
     return pd.to_datetime(now).tz_localize(tz)
 
+
 def ensure_timestamp_in_manila(ts):
     """
     Take ts (pandas Timestamp or convertible), return tz-aware Timestamp in Asia/Manila.
@@ -190,6 +197,16 @@ def ensure_timestamp_in_manila(ts):
         except Exception:
             pass
     return ts
+
+# New helper: canonical suggestion mapping
+def map_label_to_suggestion(label):
+    """Map canonical label ('up'/'down'/'neutral') to suggestion text."""
+    l = (label or "").strip().lower()
+    if l == "up":
+        return "Buy"
+    if l == "down":
+        return "Sell"
+    return "Hold"  # neutral or anything else
 
 # ------------------------------
 # Tabs
@@ -384,7 +401,28 @@ if run_button:
                 except Exception:
                     raw_pred = mod.predict(X_in.reshape((1,-1)))
                 lab, conf, rawinfo = label_from_model(mod, X_in)
-                results.append({"model": name, "label": lab.capitalize(), "confidence": round(float(conf),4), "signal": ("Buy" if lab.lower()=="up" else ("Sell" if lab.lower()=="down" else "Hold")), "raw": rawinfo})
+
+                # normalize label to canonical up/down/neutral when possible
+                lab_str = str(lab).strip()
+                lab_canon = lab_str.lower()
+                if lab_canon not in ("up","down","neutral"):
+                    try:
+                        if isinstance(rawinfo, (int, np.integer)):
+                            lab_idx = int(rawinfo)
+                            if 0 <= lab_idx < len(label_map):
+                                lab_canon = label_map[lab_idx].lower()
+                    except Exception:
+                        pass
+                lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
+
+                results.append({
+                    "model": name,
+                    "label": lab_display,
+                    "confidence": round(float(conf),4),
+                    "suggestion": map_label_to_suggestion(lab_canon),
+                    "raw": rawinfo
+                })
+
             else:
                 expected = get_feature_names(mod)
                 n_feat = get_n_features(mod)
@@ -405,7 +443,28 @@ if run_button:
                         X_scaled_df = X_use.copy()
                     try:
                         lab, conf, rawinfo = label_from_model(mod, X_scaled_df)
-                        results.append({"model": name, "label": lab.capitalize(), "confidence": round(float(conf),4), "signal": ("Buy" if lab.lower()=="up" else ("Sell" if lab.lower()=="down" else "Hold")), "raw": rawinfo})
+
+                        # normalize label
+                        lab_str = str(lab).strip()
+                        lab_canon = lab_str.lower()
+                        if lab_canon not in ("up","down","neutral"):
+                            try:
+                                if isinstance(rawinfo, (int, np.integer)):
+                                    lab_idx = int(rawinfo)
+                                    if 0 <= lab_idx < len(label_map):
+                                        lab_canon = label_map[lab_idx].lower()
+                            except Exception:
+                                pass
+                        lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
+
+                        results.append({
+                            "model": name,
+                            "label": lab_display,
+                            "confidence": round(float(conf),4),
+                            "suggestion": map_label_to_suggestion(lab_canon),
+                            "raw": rawinfo
+                        })
+
                     except Exception as e:
                         msg = str(e)
                         provided = set(last_row.columns)
@@ -415,7 +474,7 @@ if run_button:
                         st.info(f"Missing features (sample up to 10): {missing[:10]}")
                         if unseen:
                             st.info(f"Provided features unseen by model (sample up to 10): {unseen[:10]}")
-                        results.append({"model":name,"label":"ERROR","confidence":0.0,"signal":"ERROR","raw":msg})
+                        results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":msg})
                         continue
                 elif n_feat is not None:
                     X_arr = last_row.values
@@ -436,18 +495,38 @@ if run_button:
                         X_scaled_arr = X_arr
                     try:
                         lab, conf, rawinfo = label_from_model(mod, X_scaled_arr)
-                        results.append({"model": name, "label": lab.capitalize(), "confidence": round(float(conf),4), "signal": ("Buy" if lab.lower()=="up" else ("Sell" if lab.lower()=="down" else "Hold")), "raw": rawinfo})
+
+                        lab_str = str(lab).strip()
+                        lab_canon = lab_str.lower()
+                        if lab_canon not in ("up","down","neutral"):
+                            try:
+                                if isinstance(rawinfo, (int, np.integer)):
+                                    lab_idx = int(rawinfo)
+                                    if 0 <= lab_idx < len(label_map):
+                                        lab_canon = label_map[lab_idx].lower()
+                            except Exception:
+                                pass
+                        lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
+
+                        results.append({
+                            "model": name,
+                            "label": lab_display,
+                            "confidence": round(float(conf),4),
+                            "suggestion": map_label_to_suggestion(lab_canon),
+                            "raw": rawinfo
+                        })
+
                     except Exception as e:
                         st.error(f"{name} prediction failed: {e}")
-                        results.append({"model":name,"label":"ERROR","confidence":0.0,"signal":"ERROR","raw":str(e)})
+                        results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
                         continue
                 else:
                     st.error(f"Model {name} lacks feature info; cannot align.")
-                    results.append({"model":name,"label":"ERROR","confidence":0.0,"signal":"ERROR","raw":"no feature info"})
+                    results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":"no feature info"})
                     continue
         except Exception as e:
             st.error(f"Unhandled error predicting with {name}: {e}")
-            results.append({"model":name,"label":"ERROR","confidence":0.0,"signal":"ERROR","raw":str(e)})
+            results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
 
     # Display Predictions tab
     with tab2:
@@ -458,22 +537,25 @@ if run_button:
         if data_is_stale:
             st.warning("Fetched market data is stale relative to the real-time clock. Predictions used latest available data but it may lag.")
 
+        # show predictions table
         if results:
-            out = pd.DataFrame(results)[["model","label","confidence","signal","raw"]]
-            def color_signal(v):
-                if v=="Buy": return f"background-color:{COLOR_BUY_BG}"
-                if v=="Sell": return f"background-color:{COLOR_SELL_BG}"
-                if v=="Hold": return f"background-color:{COLOR_HOLD_BG}"
+            out = pd.DataFrame(results)[["model", "label", "confidence", "suggestion", "raw"]]
+
+            def color_suggestion(v):
+                if v == "Buy": return f"background-color:{COLOR_BUY_BG}"
+                if v == "Sell": return f"background-color:{COLOR_SELL_BG}"
+                if v == "Hold": return f"background-color:{COLOR_HOLD_BG}"
                 return ""
+
             try:
-                st.dataframe(out.style.applymap(color_signal, subset=["signal"]))
+                st.dataframe(out.style.applymap(color_suggestion, subset=["suggestion"]))
             except Exception:
                 st.dataframe(out)
         else:
             st.warning("No predictions produced.")
 
         # Conclusive meta (preferred) with ensemble fallback
-        con_label=None; con_conf=0.0; con_src="ensemble"
+        con_label = None; con_conf = 0.0; con_src = "ensemble"
         if "meta" in loaded:
             try:
                 meta_mod = loaded["meta"]
@@ -507,38 +589,57 @@ if run_button:
                     lab, conf, rawinfo = label_from_model(meta_mod, X_scaled)
                 else:
                     raise RuntimeError("meta has no feature info")
-                con_label = lab.capitalize(); con_conf = float(conf); con_src="meta"
+                # normalize meta label
+                meta_label = str(lab).strip().lower()
+                if meta_label in ("up", "down", "neutral"):
+                    con_label = meta_label.capitalize()
+                    con_conf = float(conf)
+                    con_src = "meta"
+                else:
+                    con_label = None
             except Exception as e:
                 st.warning(f"Meta failed to produce conclusive output: {e}. Falling back to ensemble.")
                 con_label = None
 
         if con_label is None:
-            valid_rows = [r for r in results if r.get("label") not in ("ERROR","Unknown","unknown")]
+            valid_rows = [r for r in results if r.get("label") not in ("ERROR", "Unknown", "unknown")]
             if valid_rows:
-                votes={}
+                votes = {}
                 for r in valid_rows:
-                    lbl=r["label"].lower(); votes.setdefault(lbl,[]).append(r.get("confidence",0.0))
-                best_label=None; best_count=-1; best_conf=-1.0
-                for lbl,confs in votes.items():
-                    cnt=len(confs); avgc=float(np.mean(confs)) if confs else 0.0
-                    if (cnt>best_count) or (cnt==best_count and avgc>best_conf):
-                        best_label=lbl; best_count=cnt; best_conf=avgc
-                if best_label is not None:
-                    con_label=best_label.capitalize(); con_conf=float(best_conf); con_src="ensemble"
+                    lbl = r["label"].lower() if isinstance(r.get("label"), str) else ""
+                    votes.setdefault(lbl, []).append(r.get("confidence", 0.0))
+                best_label = None; best_count = -1; best_conf = -1.0
+                for lbl, confs in votes.items():
+                    cnt = len(confs)
+                    avgc = float(np.mean(confs)) if confs else 0.0
+                    if (cnt > best_count) or (cnt == best_count and avgc > best_conf):
+                        best_label = lbl; best_count = cnt; best_conf = avgc
+                if best_label is not None and best_label in ("up", "down", "neutral"):
+                    con_label = best_label.capitalize()
+                    con_conf = float(best_conf)
+                    con_src = "ensemble"
                 else:
-                    con_label="No reliable consensus"; con_conf=0.0; con_src="none"
+                    con_label = "No reliable consensus"
+                    con_conf = 0.0
+                    con_src = "none"
             else:
-                con_label="No reliable consensus"; con_conf=0.0; con_src="none"
+                con_label = "No reliable consensus"
+                con_conf = 0.0
+                con_src = "none"
 
-        # show conclusive box (muted)
+        # show conclusive box (label is Up/Down/Neutral)
         if con_label:
-            if con_label.lower()=="up": bg=COLOR_BUY_BG; title="CONCLUSIVE: BUY (price likely UP next interval)"
-            elif con_label.lower()=="down": bg=COLOR_SELL_BG; title="CONCLUSIVE: SELL (price likely DOWN next interval)"
-            elif con_label.lower() in ("neutral","hold"): bg=COLOR_HOLD_BG; title="CONCLUSIVE: HOLD / NEUTRAL"
-            else: bg=COLOR_HOLD_BG; title=f"CONCLUSIVE: {con_label}"
+            suggestion = map_label_to_suggestion(con_label.lower()) if isinstance(con_label, str) else "Hold"
+            if con_label.lower() == "up":
+                bg = COLOR_BUY_BG
+            elif con_label.lower() == "down":
+                bg = COLOR_SELL_BG
+            else:
+                bg = COLOR_HOLD_BG
             html = f"""
             <div style="padding:14px;border-radius:8px;background:{bg};color:{COLOR_TEXT}">
-              <h3 style="margin:0;">{title}</h3>
+              <h3 style="margin:0;">CONCLUSIVE: {con_label}</h3>
+              <p style="margin:4px 0 0 0;"><strong>Suggestion:</strong> {suggestion}</p>
               <p style="margin:4px 0 0 0;"><strong>Source:</strong> {con_src}</p>
               <p style="margin:4px 0 0 0;"><strong>Confidence:</strong> {round(con_conf,4)}</p>
             </div>
