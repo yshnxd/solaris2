@@ -904,19 +904,6 @@ if run_button:
         except Exception as e:
             st.warning(f"Failed to append/save history: {e}")
 
-        # show history filtered for this ticker
-        try:
-            history = load_history()
-            if not history.empty:
-                hist_t = history[history['ticker'].str.upper() == ticker.upper()].sort_values('predicted_at', ascending=False)
-                if not hist_t.empty:
-                    st.subheader('Prediction history — this ticker')
-                    cols = ['predicted_at','target_time','predicted_label','suggestion','confidence','pred_price','actual_price','pct_change','correct','evaluated','checked_at']
-                    available = [c for c in cols if c in hist_t.columns]
-                    st.dataframe(hist_t[available].head(50))
-        except Exception:
-            pass
-
         # download
         if results:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
@@ -1084,6 +1071,50 @@ with tab4:
     st.subheader("History Prediction Section")
 
     history = load_history()
+    # Force re-evaluation button (user requested)
+    if st.button("Force re-evaluate pending predictions"):
+        st.info("Force re-evaluation started — fetching market data and attempting to evaluate pending predictions...")
+        unevaluated = history[~history['evaluated'].astype(bool)]
+        if unevaluated.empty:
+            st.success("No pending predictions to evaluate.")
+        else:
+            raw_price_map = {}
+            groups = unevaluated.groupby(['ticker','interval'])
+            for (tk, iv), grp in groups:
+                try:
+                    yf_interval = iv if isinstance(iv, str) else "60m"
+                    min_fetched = grp['fetched_last_ts'].min()
+                    max_target = grp['target_time'].max()
+                    start = (pd.to_datetime(min_fetched) - pd.Timedelta(days=2)).date()
+                    end = (pd.to_datetime(max_target) + pd.Timedelta(days=1)).date()
+                    df = None
+                    try:
+                        df = yf.download(tk, start=start, end=end, interval=yf_interval, progress=False)
+                    except Exception as e:
+                        st.warning(f"Download failed for {tk} ({iv}): {e}")
+                    if df is not None and not df.empty:
+                        raw_price_map[tk.upper()] = df
+                except Exception as e:
+                    st.warning(f"Failed to prepare download for {tk}: {e}")
+
+            if raw_price_map:
+                all_index = sorted(set().union(*(df.index for df in raw_price_map.values())))
+                aligned_close_for_eval = pd.DataFrame(index=all_index)
+                for t, df in raw_price_map.items():
+                    aligned_close_for_eval[t] = df.reindex(all_index)["Close"]
+                try:
+                    now_manila = datetime.now(ZoneInfo("Asia/Manila"))
+                except Exception:
+                    now_manila = datetime.utcnow()
+                try:
+                    history = evaluate_history(history, aligned_close_for_eval, now_manila)
+                    save_history(history)
+                    st.success("Force evaluation done and history updated where possible.")
+                except Exception as e:
+                    st.warning(f"Force evaluation attempt failed: {e}")
+            else:
+                st.info("Could not fetch price series for the pending tickers — they will be re-attempted later.")
+
     if history is None or history.empty:
         st.info("No prediction history found. Predictions will be recorded here after you run the model.")
     else:
