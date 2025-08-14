@@ -60,9 +60,10 @@ prob_threshold = st.sidebar.slider("Prob threshold for confident class", 0.05, 0
 models_to_run = st.sidebar.multiselect("Models to run", ["cnn", "lstm", "xgb", "meta"], default=["cnn", "lstm", "xgb", "meta"])
 run_button = st.sidebar.button("Fetch live data & predict NEXT interval (real-time)")
 
+# *** default neutral threshold changed to 0.006 per request ***
 neutral_threshold = st.sidebar.number_input(
     "Neutral threshold (abs % move to call 'Neutral')",
-    min_value=0.0, max_value=0.1, value=0.002, step=0.0005, format="%.4f"
+    min_value=0.0, max_value=0.1, value=0.006, step=0.0005, format="%.4f"
 )
 history_file = st.sidebar.text_input("History CSV file", "predictions_history.csv")
 
@@ -217,6 +218,9 @@ def load_history():
             for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
                 if c in df.columns:
                     df[c] = pd.to_datetime(df[c], errors='coerce')
+            if 'evaluated' in df.columns:
+                # ensure boolean-like
+                df['evaluated'] = df['evaluated'].astype('boolean')
             return df
     except Exception:
         pass
@@ -228,7 +232,15 @@ def save_history(df):
         d = os.path.dirname(history_file)
         if d:
             os.makedirs(d, exist_ok=True)
-        df.to_csv(history_file, index=False)
+        # convert Timestamp objects to strings for CSV stability
+        df_copy = df.copy()
+        for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
+            if c in df_copy.columns:
+                try:
+                    df_copy[c] = df_copy[c].astype(str)
+                except Exception:
+                    pass
+        df_copy.to_csv(history_file, index=False)
     except Exception as e:
         st.warning(f"Failed saving history to {history_file}: {e}")
 
@@ -247,6 +259,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             t_target = pd.to_datetime(row['target_time'])
             tk = str(row.get('ticker', '')).upper()
             if tk not in aligned_close_df.columns:
+                # can't evaluate without price series for this ticker
                 continue
             series = aligned_close_df[tk].dropna()
             if series.empty:
@@ -256,7 +269,12 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             except Exception:
                 pred_price = None
             try:
-                actual_price = float(series.asof(t_target))
+                # try exact index lookup, then asof
+                actual_price = None
+                if t_target in series.index:
+                    actual_price = float(series.loc[t_target])
+                else:
+                    actual_price = float(series.asof(t_target))
             except Exception:
                 actual_price = None
             if pred_price is None or actual_price is None or pred_price == 0:
@@ -265,9 +283,10 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             pred_label = str(row.get('predicted_label', '')).strip().lower()
             thr = float(neutral_threshold)
             correct = False
-            if pred_label == 'up' and pct > 0:
+            # canonical correctness test based on neutral threshold
+            if pred_label == 'up' and pct > thr:
                 correct = True
-            elif pred_label == 'down' and pct < 0:
+            elif pred_label == 'down' and pct < -thr:
                 correct = True
             elif pred_label == 'neutral' and abs(pct) <= thr:
                 correct = True
@@ -284,7 +303,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
 # ------------------------------
 # Tabs
 # ------------------------------
-tab1, tab2, tab3 = st.tabs(["Live Market View", "Predictions", "Detailed Analysis"])
+tab1, tab2, tab3, tab4 = st.tabs(["Live Market View", "Predictions", "Detailed Analysis", "History Predictions"])
 
 # ------------------------------
 # Run pipeline
@@ -342,10 +361,14 @@ if run_button:
     # --- load and evaluate past history (if any) ---
     try:
         history = load_history()
-        history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
-        save_history(history)
+        # call evaluate_history using aligned_close fetched for this run
+        try:
+            history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
+            save_history(history)
+        except Exception as e:
+            st.warning(f"History evaluation failed during run: {e}")
     except Exception as e:
-        st.warning(f"History evaluation failed: {e}")
+        st.warning(f"History loading failed: {e}")
 
     # Build features for chosen ticker
     def build_features(aligned_close_df, raw_dict, tgt):
@@ -1053,3 +1076,159 @@ if run_button:
                 st.write("Could not compute history accuracy.")
 
 # end if run_button
+
+# ------------------------------
+# History Predictions tab (separate section + auto-eval)
+# ------------------------------
+with tab4:
+    st.subheader("History Prediction Section")
+
+    history = load_history()
+    if history is None or history.empty:
+        st.info("No prediction history found. Predictions will be recorded here after you run the model.")
+    else:
+        # normalize datetime columns
+        for c in ['predicted_at','fetched_last_ts','target_time','checked_at']:
+            if c in history.columns:
+                history[c] = pd.to_datetime(history[c], errors='coerce')
+
+        unevaluated = history[~history['evaluated'].astype(bool)]
+        if not unevaluated.empty:
+            st.info(f"Found {len(unevaluated)} unevaluated prediction(s). Attempting to fetch market data to evaluate them...")
+            # Group unevaluated rows by (ticker, interval) and fetch a single chunk per group
+            raw_price_map = {}
+            groups = unevaluated.groupby(['ticker','interval'])
+            for (tk, iv), grp in groups:
+                try:
+                    # choose download interval
+                    yf_interval = iv if isinstance(iv, str) else "60m"
+                    # select window: from earliest fetched_last_ts minus buffer to latest target_time plus buffer
+                    min_fetched = grp['fetched_last_ts'].min()
+                    max_target = grp['target_time'].max()
+                    start = (pd.to_datetime(min_fetched) - pd.Timedelta(days=2)).date()
+                    end = (pd.to_datetime(max_target) + pd.Timedelta(days=1)).date()
+                    # download
+                    df = None
+                    try:
+                        df = yf.download(tk, start=start, end=end, interval=yf_interval, progress=False)
+                    except Exception as e:
+                        st.warning(f"Download failed for {tk} ({iv}): {e}")
+                    if df is not None and not df.empty:
+                        raw_price_map[tk.upper()] = df
+                except Exception as e:
+                    st.warning(f"Failed to prepare download for {tk}: {e}")
+
+            if raw_price_map:
+                # build aligned_close with union of indices (na where missing)
+                all_index = sorted(set().union(*(df.index for df in raw_price_map.values())))
+                aligned_close_for_eval = pd.DataFrame(index=all_index)
+                for t, df in raw_price_map.items():
+                    aligned_close_for_eval[t] = df.reindex(all_index)["Close"]
+                # use now in Manila as evaluation 'current' time
+                try:
+                    now_manila = datetime.now(ZoneInfo("Asia/Manila"))
+                except Exception:
+                    now_manila = datetime.utcnow()
+                try:
+                    history = evaluate_history(history, aligned_close_for_eval, now_manila)
+                    save_history(history)
+                    st.success("Evaluation done and history updated where possible.")
+                except Exception as e:
+                    st.warning(f"Evaluation attempt failed: {e}")
+            else:
+                st.info("Could not fetch price series for the pending tickers — they will be re-attempted on the next run or when market data is available.")
+
+        # Re-load after attempted evaluation
+        history = load_history()
+
+        # --- 1) Summary Accuracy Stats ---
+        total_preds = len(history)
+        evaluated_rows = history[history['evaluated'].astype(bool)]
+        evaluated_count = len(evaluated_rows)
+        correct_count = int(evaluated_rows['correct'].sum()) if evaluated_count > 0 else 0
+        accuracy = (correct_count / evaluated_count) if evaluated_count > 0 else 0.0
+
+        st.markdown("### Summary Accuracy Stats")
+        cols = st.columns([2, 1])
+        with cols[0]:
+            st.write(f"**Total Predictions Made:** {total_preds}")
+            st.write(f"**Correct Predictions:** {correct_count}")
+            st.write(f"**Evaluated:** {evaluated_count}")
+            st.write(f"**Accuracy:** {accuracy:.1%}" if evaluated_count > 0 else "**Accuracy:** N/A (no evaluated rows)")
+
+        with cols[1]:
+            # donut chart: correct / incorrect / pending
+            pending_count = total_preds - evaluated_count
+            incorrect = evaluated_count - correct_count
+            pie_vals = [correct_count, incorrect, pending_count]
+            pie_labels = ["Correct", "Incorrect", "Pending"]
+            try:
+                fig_donut = go.Figure(go.Pie(labels=pie_labels, values=pie_vals, hole=0.6,
+                                            marker=dict(colors=["#16a34a","#ef4444","#9ca3af"])))
+                fig_donut.update_layout(showlegend=True, margin=dict(t=0,b=0,l=0,r=0), height=200)
+                st.plotly_chart(fig_donut, use_container_width=True)
+            except Exception:
+                st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
+
+        # --- 2) Recent Predictions Table ---
+        st.markdown("### Recent Predictions Table")
+        # prepare table with desired columns
+        display_rows = []
+        # compute actual movement labels when possible
+        for _, row in history.sort_values('predicted_at', ascending=False).head(200).iterrows():
+            pred_at = row.get('predicted_at')
+            tk = str(row.get('ticker','')).upper()
+            pred_lbl = str(row.get('predicted_label','')).upper() if pd.notna(row.get('predicted_label')) else ""
+            actual_move = ""
+            correct_mark = "⏳"
+            if pd.notna(row.get('actual_price')) and pd.notna(row.get('pred_price')):
+                try:
+                    pct = float(row.get('pct_change'))
+                    thr = float(neutral_threshold)
+                    if abs(pct) <= thr:
+                        actual_move = "NEUTRAL"
+                    elif pct > 0:
+                        actual_move = "UP"
+                    else:
+                        actual_move = "DOWN"
+                except Exception:
+                    actual_move = ""
+            else:
+                # if actual_price not present but target_time <= now, mark pending (it may have failed evaluation)
+                if pd.notna(row.get('target_time')):
+                    try:
+                        if pd.to_datetime(row.get('target_time')) <= pd.Timestamp.now(tz=ZoneInfo("Asia/Manila")):
+                            actual_move = ""  # attempted but not available
+                        else:
+                            actual_move = ""
+                    except Exception:
+                        actual_move = ""
+            # correct?
+            if pd.notna(row.get('correct')):
+                correct_mark = "✅" if bool(row.get('correct')) else "❌"
+            else:
+                correct_mark = "⏳"
+
+            display_rows.append({
+                "Date/Time": pred_at,
+                "Ticker": tk,
+                "Predicted Movement": pred_lbl,
+                "Actual Movement": actual_move,
+                "Correct?": correct_mark
+            })
+
+        df_display = pd.DataFrame(display_rows)
+        if not df_display.empty:
+            try:
+                st.dataframe(df_display)
+            except Exception:
+                st.write(df_display)
+        else:
+            st.write("No rows to show.")
+
+        # allow download of the filtered history CSV
+        try:
+            csv_bytes = history.to_csv(index=False).encode("utf-8")
+            st.download_button("Download full history CSV", data=csv_bytes, file_name="predictions_history.csv")
+        except Exception:
+            pass
