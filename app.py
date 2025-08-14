@@ -715,7 +715,7 @@ if run_button:
         st.write(f"Real-time clock now (Asia/Manila): **{now_manila.strftime('%Y-%m-%d %H:%M:%S %Z')}**")
         st.write(f"Real next-interval target (clock-based): **{real_next_time}**")
         if data_is_stale:
-            st.caption("Note: fetched market data is stale relative to the real-time clock and may lag real-time.")may lag.")
+            st.caption("Note: fetched market data is stale relative to the real-time clock and may lag real-time.")
 
         # show predictions table (no colored suggestions)
         if results:
