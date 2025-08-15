@@ -206,24 +206,28 @@ def ensure_timestamp_in_manila(ts):
     try:
         tz = ZoneInfo("Asia/Manila")
     except Exception:
-        tz = ZoneInfo("Asia/Manila")
+        # Fallback for older Python versions or environments without zoneinfo
+        from pytz import timezone
+        tz = timezone("Asia/Manila")
 
     ts = pd.to_datetime(ts, errors='coerce')
     if pd.isna(ts):
-        return pd.Timestamp.now(tz)
+        return pd.Timestamp.now(tz=tz) # Ensure now() is also tz-aware
     if getattr(ts, "tzinfo", None) is None:
         try:
-            ts = ts.tz_localize("UTC").tz_convert(tz)
+            # Assume UTC if naive, then convert
+            ts = ts.tz_localize("UTC", ambiguous='infer').tz_convert(tz)
         except Exception:
             try:
-                ts = ts.tz_localize(tz)
+                # If UTC localize fails, try localizing directly to Manila
+                ts = ts.tz_localize(tz, ambiguous='infer')
             except Exception:
-                pass
+                pass # Keep as is if all fails, but this is less ideal
     else:
         try:
             ts = ts.tz_convert(tz)
         except Exception:
-            pass
+            pass # Keep as is if conversion fails
     return ts
 
 def compute_real_next_time_now(interval):
@@ -231,7 +235,8 @@ def compute_real_next_time_now(interval):
     try:
         tz = ZoneInfo("Asia/Manila")
     except Exception:
-        tz = ZoneInfo("Asia/Manila")
+        from pytz import timezone
+        tz = timezone("Asia/Manila")
     now = datetime.now(tz)
 
     if isinstance(interval, str) and interval.endswith("m"):
@@ -244,6 +249,7 @@ def compute_real_next_time_now(interval):
             else:
                 delta_min = mins - remainder
                 next_ts = (now.replace(second=0, microsecond=0) + timedelta(minutes=delta_min))
+            # Ensure the returned Timestamp is tz-aware Manila
             return pd.Timestamp(next_ts).tz_localize(tz) if getattr(pd.Timestamp(next_ts), "tzinfo", None) is None else pd.Timestamp(next_ts).tz_convert(tz)
         except Exception:
             return pd.Timestamp(now).tz_localize(tz)
@@ -358,6 +364,48 @@ def load_history():
 def save_history(df):
     save_history_atomic(df, history_file)
 
+def price_at_or_before(series: pd.Series, when_ts: pd.Timestamp):
+    """
+    Robustly get the price from a series at or before a given timestamp.
+    Ensures series index and target timestamp are timezone-aware Manila.
+    """
+    if series is None or series.empty:
+        return float("nan")
+
+    # Ensure series index is datetime and tz-aware Manila
+    try:
+        s = series.copy()
+        s.index = pd.to_datetime(s.index)
+        if getattr(s.index, "tz", None) is None:
+            s.index = s.index.tz_localize("UTC", ambiguous='infer').tz_convert(ZoneInfo("Asia/Manila"))
+        else:
+            s.index = s.index.tz_convert(ZoneInfo("Asia/Manila"))
+    except Exception as e:
+        warn(f"Could not localize/convert series index to Manila TZ for price lookup: {e}")
+        s = series.copy() # Use as is, might be naive or wrong tz
+        s.index = pd.to_datetime(s.index) # Ensure datetime index
+
+    if not s.index.is_monotonic_increasing:
+        s = s.sort_index()
+
+    when_ts = ensure_timestamp_in_manila(when_ts) # Ensure target timestamp is also Manila TZ
+
+    # Use asof for robust lookup
+    val = s.asof(when_ts)
+    if pd.notna(val):
+        return float(val)
+
+    # Fallback if asof doesn't find an exact match or prior
+    # If when_ts is before the first available data, take the first valid price
+    if when_ts < s.index[0]:
+        first_valid = s.dropna()
+        return float(first_valid.iloc[0]) if not first_valid.empty else float("nan")
+
+    # If asof failed and it's not before the first, it means no data at or before.
+    # This might indicate a gap or an issue with the data itself.
+    return float("nan")
+
+
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
     """
     Robust evaluation of pending history rows.
@@ -387,7 +435,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
         pass
     try:
         if getattr(ac.index, "tz", None) is None:
-            ac.index = ac.index.tz_localize("UTC").tz_convert(ZoneInfo("Asia/Manila"))
+            ac.index = ac.index.tz_localize("UTC", ambiguous='infer').tz_convert(ZoneInfo("Asia/Manila"))
         else:
             ac.index = ac.index.tz_convert(ZoneInfo("Asia/Manila"))
     except Exception:
@@ -399,30 +447,6 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
         now_ts = ensure_timestamp_in_manila(current_fetched_ts)
     except Exception:
         now_ts = ensure_timestamp_in_manila(pd.Timestamp.now())
-
-    def price_at_or_before(series, when_ts):
-        if series is None or series.empty:
-            return float("nan")
-        try:
-            s = series.copy()
-            s.index = pd.to_datetime(s.index)
-            if getattr(s.index, "tz", None) is None:
-                s.index = s.index.tz_localize("UTC").tz_convert(ZoneInfo("Asia/Manila"))
-            else:
-                s.index = s.index.tz_convert(ZoneInfo("Asia/Manila"))
-        except Exception:
-            s = series.copy()
-        if not s.index.is_monotonic_increasing:
-            s = s.sort_index()
-        when_ts = ensure_timestamp_in_manila(when_ts)
-        if when_ts < s.index[0]:
-            first_valid = s.dropna()
-            return float(first_valid.iloc[0]) if not first_valid.empty else float("nan")
-        sel = s[:when_ts]
-        if sel.empty:
-            return float("nan")
-        v = sel.iloc[-1]
-        return float(v) if pd.notna(v) else float("nan")
 
     history_df['_target_norm'] = history_df['target_time'].apply(lambda x: (ensure_timestamp_in_manila(x) if pd.notna(x) else pd.NaT))
 
@@ -454,19 +478,23 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
                 history_df.at[idx, 'eval_error'] = f"ambiguous_predicted_label:{raw_label}"
                 continue
 
+            # Prioritize the already recorded pred_price if it exists and is valid
             pred_price_val = None
             if pd.notna(row.get('pred_price')):
                 try:
                     pred_price_val = float(row.get('pred_price'))
                 except Exception:
-                    pred_price_val = None
+                    pred_price_val = None # Invalid recorded price
 
+            # If recorded pred_price is missing or invalid, try to derive it from fetched_last_ts
             if pred_price_val is None:
                 fetched_ts = row.get('fetched_last_ts')
                 if pd.notna(fetched_ts):
                     pred_price_val = price_at_or_before(series, fetched_ts)
                 else:
+                    # Fallback if fetched_last_ts is also missing, try just before target_time
                     pred_price_val = price_at_or_before(series, t_target - pd.Timedelta(seconds=1))
+
 
             actual_price_val = price_at_or_before(series, t_target)
 
@@ -474,7 +502,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             history_df.at[idx, 'actual_price'] = (None if pd.isna(actual_price_val) else float(actual_price_val))
 
             if pd.isna(pred_price_val) or pd.isna(actual_price_val):
-                history_df.at[idx, 'eval_error'] = "missing_pred_or_actual_price"
+                history_df.at[idx, 'eval_error'] = "missing_pred_or_actual_price_for_eval"
                 history_df.at[idx, 'pct_change'] = None
                 history_df.at[idx, 'correct'] = None
                 continue
@@ -504,7 +532,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
 
         except Exception as e:
             try:
-                history_df.at[idx, 'eval_error'] = f"exception:{str(e)}"
+                history_df.at[idx, 'eval_error'] = f"exception_during_eval:{str(e)}" # More specific error
                 history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo("Asia/Manila"))
             except Exception:
                 pass
@@ -560,7 +588,8 @@ if run_button:
     try:
         tz_manila = ZoneInfo("Asia/Manila")
     except Exception:
-        tz_manila = ZoneInfo("Asia/Manila")
+        from pytz import timezone
+        tz_manila = timezone("Asia/Manila")
     now_manila = datetime.now(tz_manila)
 
     # compute age safely (both tz-aware)
@@ -1061,12 +1090,11 @@ if run_button:
             pred_price = None
             if ticker in aligned_close.columns:
                 try:
-                    pred_price = float(aligned_close[ticker].asof(fetched_last_ts_manila))
-                except Exception:
-                    try:
-                        pred_price = float(aligned_close[ticker].loc[fetched_last_ts_manila])
-                    except Exception:
-                        pred_price = None
+                    # Use the robust price_at_or_before helper
+                    pred_price = price_at_or_before(aligned_close[ticker], fetched_last_ts_manila)
+                except Exception as e:
+                    warn(f"Could not get pred_price for new history row: {e}")
+                    pred_price = None
         except Exception:
             pred_price = None
 
@@ -1358,12 +1386,11 @@ with tab4:
                     for t, df in raw_price_map.items():
                         aligned_close_for_eval[t] = df.reindex(all_index)["Close"]
 
-                    # pick evaluation timestamp: use max target_time (so all historic targets <= that will be evaluated)
+                    # pick evaluation timestamp: use current time in Manila for comprehensive evaluation
                     try:
-                        max_target_all = history['target_time'].max()
-                        eval_ts = ensure_timestamp_in_manila(max_target_all) if pd.notna(max_target_all) else datetime.now(ZoneInfo("Asia/Manila"))
-                    except Exception:
                         eval_ts = datetime.now(ZoneInfo("Asia/Manila"))
+                    except Exception:
+                        eval_ts = datetime.utcnow() # Fallback if timezone fails
 
                     # run evaluation
                     try:
