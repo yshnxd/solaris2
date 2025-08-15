@@ -29,7 +29,7 @@ np.random.seed(SEED)
 random.seed(SEED)
 tf.random.set_seed(SEED)
 
-st.set_page_config(page_title="Solaris Reborn — Real-time Next-Hour", layout="wide")
+st.set_page_config(page_title="Solaris - Predict Next Hour!", layout="wide")
 st.title("SOLARIS — Stock Price Movement Predictor")
 st.markdown("_A machine learning–driven hybrid model for short-term market trend forecasting_")
 
@@ -42,9 +42,9 @@ ticker = ticker.strip().upper()
 
 sequence_length = st.sidebar.number_input("Sequence length (LSTM/CNN)", min_value=3, max_value=240, value=24, step=1)
 
-interval = st.sidebar.selectbox("Interval", ["60m", "1d"], index=0)
-period_default = "2d" if interval == "60m" else "90d"
-period = st.sidebar.text_input("Period (e.g., 2d for intraday, 90d)", period_default)
+interval = st.sidebar.selectbox("Interval", ["60m"], index=0)
+period_default = "90d" if interval == "60m" else "90d"
+period = st.sidebar.text_input("Period (try 90d, 365d, or 729d)", period_default)
 
 st.sidebar.markdown("---")
 st.sidebar.write("Model files (relative to app.py):")
@@ -62,7 +62,7 @@ run_button = st.sidebar.button("Fetch live data & predict NEXT interval (real-ti
 
 neutral_threshold = st.sidebar.number_input(
     "Neutral threshold (abs % move to call 'Neutral')",
-    min_value=0.0, max_value=0.1, value=0.002, step=0.0005, format="%.4f"
+    min_value=0.0, max_value=0.1, value=0.006, step=0.0005, format="%.4f"
 )
 history_file = st.sidebar.text_input("History CSV file", "predictions_history.csv")
 
@@ -1272,6 +1272,124 @@ if run_button:
 
 with tab4:
     st.subheader("History Prediction Section")
+# === Re-evaluate ALL history (force) ===
+if st.button("Re-evaluate ALL history (force reset)"):
+    summary_ph = st.empty()
+    summary_ph.info("Preparing to re-evaluate ALL history (this may download price data)...")
+
+    # load history
+    history = load_history()
+    if history is None or history.empty:
+        summary_ph.info("No history found to re-evaluate.")
+    else:
+        with st.spinner("Re-evaluating all history rows — downloading price data where needed..."):
+            # Reset evaluated marker so all rows will be attempted
+            history['evaluated'] = False
+            # clear old eval fields where present
+            for c in ['eval_error','checked_at','actual_price','pct_change','correct']:
+                if c in history.columns:
+                    history[c] = pd.NA
+
+            # gather groups (ticker, interval)
+            groups = history.groupby(['ticker','interval'])
+            raw_price_map = {}
+            # compute global min/max for download bounds fallback
+            try:
+                global_min_fetched = history['fetched_last_ts'].min()
+            except Exception:
+                global_min_fetched = pd.NaT
+            try:
+                global_max_target = history['target_time'].max()
+            except Exception:
+                global_max_target = pd.NaT
+
+            for (tk, iv), grp in groups:
+                try:
+                    tk_clean = str(tk).strip()
+                    if not tk_clean:
+                        continue
+                    tk_for_yf = tk_clean.upper()
+                    # choose yf interval fallback
+                    yf_interval = iv if isinstance(iv, str) else "60m"
+
+                    # determine start/end window for download
+                    min_fetched = grp['fetched_last_ts'].min() if 'fetched_last_ts' in grp.columns else pd.NaT
+                    max_target = grp['target_time'].max() if 'target_time' in grp.columns else pd.NaT
+
+                    # fallback to global values if per-group missing
+                    if pd.isna(min_fetched) and pd.notna(global_min_fetched):
+                        min_fetched = global_min_fetched
+                    if pd.isna(max_target) and pd.notna(global_max_target):
+                        max_target = global_max_target
+
+                    # safe date range (extend a couple days on each side)
+                    if pd.notna(min_fetched):
+                        start = (pd.to_datetime(min_fetched) - pd.Timedelta(days=3)).date()
+                    elif pd.notna(max_target):
+                        start = (pd.to_datetime(max_target) - pd.Timedelta(days=7)).date()
+                    else:
+                        # worst-case: last 90 days
+                        start = (pd.Timestamp.now() - pd.Timedelta(days=90)).date()
+
+                    if pd.notna(max_target):
+                        end = (pd.to_datetime(max_target) + pd.Timedelta(days=2)).date()
+                    else:
+                        end = pd.Timestamp.now().date()
+
+                    # attempt cached download; if interval is intraday (endswith 'm') prefer use_tk_history
+                    use_tk_history = isinstance(yf_interval, str) and yf_interval.endswith('m')
+                    df = download_price_cached(tk_for_yf, interval=yf_interval, start=start, end=end, use_tk_history=use_tk_history)
+                    if df is not None and not df.empty:
+                        raw_price_map[tk_for_yf.upper()] = df
+                except Exception as e:
+                    st.warning(f"Failed preparing/downloading for {tk}/{iv}: {e}")
+                    continue
+
+            if not raw_price_map:
+                summary_ph.warning("Could not fetch price data for any tickers in history. Aborting re-evaluation.")
+            else:
+                # build aligned close DataFrame
+                all_index = sorted(set().union(*(df.index for df in raw_price_map.values())))
+                aligned_close_for_eval = pd.DataFrame(index=all_index)
+                for t, df in raw_price_map.items():
+                    aligned_close_for_eval[t] = df.reindex(all_index)["Close"]
+
+                # pick evaluation timestamp: use max target_time (so all historic targets <= that will be evaluated)
+                try:
+                    max_target_all = history['target_time'].max()
+                    eval_ts = ensure_timestamp_in_manila(max_target_all) if pd.notna(max_target_all) else datetime.now(ZoneInfo("Asia/Manila"))
+                except Exception:
+                    eval_ts = datetime.now(ZoneInfo("Asia/Manila"))
+
+                # run evaluation
+                try:
+                    history = evaluate_history(history, aligned_close_for_eval, eval_ts)
+                    save_history(history)
+                except Exception as e:
+                    st.error(f"Re-evaluation failed: {e}")
+                    summary_ph.empty()
+                    raise
+
+                # Show summary
+                total = len(history)
+                evaluated_now = history['evaluated'].sum() if 'evaluated' in history.columns else 0
+                still_pending = total - int(evaluated_now)
+                still_errors = history[history['eval_error'].notna()] if 'eval_error' in history.columns else pd.DataFrame()
+                summary_ph.success(f"Re-evaluation attempted: {int(evaluated_now)} evaluated / {total} total. Pending: {still_pending}. Errors: {len(still_errors)}")
+
+                # show a few error rows sample
+                if not still_errors.empty:
+                    st.markdown("#### Sample rows that still have `eval_error` (first 10)")
+                    try:
+                        display = still_errors.sort_values('predicted_at', ascending=False).head(10)
+                        st.dataframe(display[['predicted_at','ticker','target_time','pred_price','actual_price','eval_error']].fillna(""))
+                    except Exception:
+                        st.write(still_errors.head(10).to_dict(orient='records'))
+
+                # done
+                summary_ph.empty()
+                st.balloons()
+                st.success("Re-evaluation complete and history saved.")
 
     history = load_history()
     if history is None or history.empty:
