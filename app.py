@@ -60,12 +60,6 @@ prob_threshold = st.sidebar.slider("Prob threshold for confident class", 0.05, 0
 models_to_run = st.sidebar.multiselect("Models to run", ["cnn", "lstm", "xgb", "meta"], default=["cnn", "lstm", "xgb", "meta"])
 run_button = st.sidebar.button("Fetch live data & predict NEXT interval (real-time)")
 
-# REMOVED: neutral_threshold sidebar input, now it's volatility-adaptive
-# neutral_threshold = st.sidebar.number_input(
-#     "Neutral threshold (abs % move to call 'Neutral')",
-#     min_value=0.0, max_value=0.1, value=0.006, step=0.0005, format="%.4f"
-# )
-
 history_file = st.sidebar.text_input("History CSV file", "predictions_history.csv")
 
 # muted colors (for conclusive box background)
@@ -262,6 +256,31 @@ def compute_real_next_time_now(interval):
     next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
     return pd.Timestamp(next_hour).tz_localize(tz)
 
+def interval_to_timedelta(interval):
+    """Convert interval string (e.g., '60m','1d','30m','2h') to a timedelta."""
+    if isinstance(interval, str):
+        iv = interval.strip().lower()
+        if iv.endswith('m'):
+            try:
+                mins = int(iv[:-1])
+                return timedelta(minutes=mins)
+            except Exception:
+                return timedelta(hours=1)
+        if iv.endswith('h'):
+            try:
+                hrs = int(iv[:-1])
+                return timedelta(hours=hrs)
+            except Exception:
+                return timedelta(hours=1)
+        if iv.endswith('d'):
+            try:
+                days = int(iv[:-1])
+                return timedelta(days=days)
+            except Exception:
+                return timedelta(days=1)
+    # default
+    return timedelta(hours=1)
+
 def map_label_to_suggestion(label):
     l = (label or "").strip().lower()
     if l == "up":
@@ -417,7 +436,7 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
     - Normalizes predicted labels to canonical {'up','down','neutral'}; if ambiguous, sets eval_error and skips evaluation.
     - Finds pred_price and actual_price using a safe "price at or before timestamp" helper.
     - Marks evaluated only when both prices are available and computes pct_change and correctness using volatility-adaptive neutral_threshold.
-    - Writes helpful fields: pred_price, actual_price, pct_change, correct (bool/None), checked_at, eval_error.
+    - Writes helpful fields: pred_price, actual_price, pct_change, correct (bool/None), checked_at, eval_error, neutral_threshold_used.
     """
     if history_df is None or history_df.empty:
         return history_df
@@ -474,7 +493,13 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
                 history_df.at[idx, 'eval_error'] = "no_price_data_for_ticker"
                 continue
 
-            raw_label = row.get('predicted_label', None)
+            # Use canonical predicted label preferentially if stored, else derive from predicted_label
+            raw_label = None
+            if 'predicted_label_canonical' in history_df.columns and pd.notna(history_df.at[idx, 'predicted_label_canonical']):
+                raw_label = history_df.at[idx, 'predicted_label_canonical']
+            else:
+                raw_label = row.get('predicted_label', None)
+
             pred_label = canonical_label(raw_label)
             if pred_label is None:
                 history_df.at[idx, 'eval_error'] = f"ambiguous_predicted_label:{raw_label}"
@@ -532,6 +557,9 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
                 thr = 0.002 # A small default, e.g., 0.2%
             else:
                 thr = vol_at_prediction * 0.5 # As per notebook design
+
+            # Persist neutral threshold used for reproducibility and display
+            history_df.at[idx, 'neutral_threshold_used'] = float(thr)
 
             # Determine the actual movement category based on the dynamic threshold
             actual_movement_category = None
@@ -602,7 +630,7 @@ if run_button:
     fetched_last_ts = base_idx[-1]
     fetched_last_ts_manila = ensure_timestamp_in_manila(fetched_last_ts)
 
-    # compute real next interval from clock
+    # compute real next interval from clock (for display only)
     real_next_time = compute_real_next_time_now(interval)
 
     # compute now in Manila
@@ -1109,6 +1137,7 @@ if run_button:
 
         try:
             pred_price = None
+            thr_used = None
             if ticker in aligned_close.columns:
                 try:
                     # Use the robust price_at_or_before helper
@@ -1116,19 +1145,50 @@ if run_button:
                 except Exception as e:
                     warn(f"Could not get pred_price for new history row: {e}")
                     pred_price = None
+                try:
+                    # compute volatility-adaptive threshold at prediction time and store it
+                    series_for_thr = aligned_close[ticker].dropna()
+                    if not series_for_thr.empty:
+                        rolling_vol_now = series_for_thr.pct_change().rolling(window=24, min_periods=1).std()
+                        vol_at_pred = rolling_vol_now.asof(fetched_last_ts_manila)
+                        if pd.isna(vol_at_pred) or vol_at_pred == 0:
+                            thr_used = 0.002
+                        else:
+                            thr_used = float(vol_at_pred) * 0.5
+                    else:
+                        thr_used = 0.002
+                except Exception:
+                    thr_used = 0.002
         except Exception:
             pred_price = None
+            thr_used = 0.002
+
+        # compute target_time relative to the fetched_last_ts to ensure alignment
+        try:
+            delta = interval_to_timedelta(interval)
+            target_time_from_fetch = ensure_timestamp_in_manila(fetched_last_ts_manila) + delta
+        except Exception:
+            # fallback to clock-based next interval
+            target_time_from_fetch = real_next_time
+
+        # canonical predicted label if possible
+        try:
+            pred_label_canon = canonical_label(con_label)
+        except Exception:
+            pred_label_canon = canonical_label(str(con_label)) if con_label is not None else None
 
         new_row = {
             'predicted_at': pd.Timestamp.now(tz_manila),
             'ticker': ticker,
             'interval': interval,
             'predicted_label': con_label if isinstance(con_label, str) else str(con_label),
+            'predicted_label_canonical': pred_label_canon,
             'suggestion': map_label_to_suggestion(con_label.lower()) if isinstance(con_label, str) else '',
             'confidence': float(con_conf) if con_conf is not None else None,
             'fetched_last_ts': fetched_last_ts_manila,
-            'target_time': real_next_time,
+            'target_time': target_time_from_fetch,
             'pred_price': pred_price,
+            'neutral_threshold_used': float(thr_used) if thr_used is not None else None,
             'evaluated': False,
             'actual_price': None,
             'pct_change': None,
@@ -1155,7 +1215,7 @@ if run_button:
                 hist_t = history[history['ticker'].str.upper() == ticker.upper()].sort_values('predicted_at', ascending=False)
                 if not hist_t.empty:
                     st.subheader('Prediction history — this ticker')
-                    cols = ['predicted_at','target_time','predicted_label','suggestion','confidence','pred_price','actual_price','pct_change','correct','evaluated','checked_at','eval_error']
+                    cols = ['predicted_at','target_time','predicted_label','suggestion','confidence','pred_price','actual_price','pct_change','correct','evaluated','checked_at','eval_error','neutral_threshold_used']
                     available = [c for c in cols if c in hist_t.columns]
                     st.dataframe(hist_t[available].head(50))
         except Exception:
@@ -1586,34 +1646,20 @@ with tab4:
             if pd.notna(row.get('actual_price')) and pd.notna(row.get('pred_price')):
                 try:
                     pct = float(row.get('pct_change'))
-                    # Re-calculate threshold for display based on stored pct_change and original series
-                    # This is a bit tricky as we don't have the full 'series' here, but we can use the stored pct_change
-                    # For display purposes, we'll use a fixed small threshold if the dynamic one isn't easily re-derivable
-                    # Or, ideally, store the 'threshold_used' in the history_df itself.
-                    # For now, let's use a default for display if the dynamic one isn't available.
-                    # The actual evaluation (correct/incorrect) already uses the dynamic one.
-                    
-                    # To accurately display 'Actual Movement', we need the threshold that was used for that specific prediction.
-                    # Since we don't store 'threshold_used' in history_df yet, we'll re-calculate it for display.
-                    # This requires the 'series' (aligned_close[tk]) and 'fetched_last_ts' for that row.
-                    # This is a limitation for display without storing the threshold.
-                    # For simplicity in display, let's use a fixed small threshold for 'Actual Movement' display
-                    # if the dynamic one is not easily available here.
-                    # A more robust solution would be to add 'neutral_threshold_used' column to history_df.
-
-                    # For now, let's assume a default for display if the dynamic one isn't easily re-calculable here.
-                    # The 'correct' column is already accurate based on the dynamic threshold.
-                    
-                    # To make 'Actual Movement' display accurate, we need to re-calculate the threshold for each row.
-                    # This means we need the 'series' (aligned_close[tk]) and 'fetched_last_ts' for each row.
-                    # This is already done in evaluate_history, but not easily accessible here for display.
-                    # Let's add a 'neutral_threshold_used' column to history_df in evaluate_history.
-                    # For now, I'll use a placeholder for 'actual_move' if the dynamic threshold isn't stored.
-                    # The 'Correct?' column is the most important and is accurate.
-
-                    # For display, let's use a simple fixed threshold if the dynamic one isn't stored.
-                    # This is a compromise for display purposes.
-                    display_thr = 0.002 # A small default for display if dynamic not stored
+                    # Use neutral_threshold_used stored during evaluation if present; fallback to stored neutral_threshold_used (prediction-time) or default
+                    display_thr = None
+                    if pd.notna(row.get('neutral_threshold_used')):
+                        try:
+                            display_thr = float(row.get('neutral_threshold_used'))
+                        except Exception:
+                            display_thr = None
+                    if display_thr is None and 'neutral_threshold_used' in row and pd.notna(row.get('neutral_threshold_used')):
+                        try:
+                            display_thr = float(row.get('neutral_threshold_used'))
+                        except Exception:
+                            display_thr = 0.002
+                    if display_thr is None:
+                        display_thr = 0.002
 
                     if pct > display_thr:
                         actual_move = "UP"
