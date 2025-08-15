@@ -43,8 +43,8 @@ ticker = ticker.strip().upper()
 sequence_length = st.sidebar.number_input("Sequence length (LSTM/CNN)", min_value=3, max_value=240, value=24, step=1)
 
 interval = st.sidebar.selectbox("Interval", ["60m", "1d"], index=0)
-period_default = "2d" if interval == "60m" else "90d"
-period = st.sidebar.text_input("Period (e.g., 2d for intraday, 90d)", period_default)
+period_default = "90d" if interval == "60m" else "90d"
+period = st.sidebar.text_input("Period (try 90d, 365d, or 729d)", period_default)
 
 st.sidebar.markdown("---")
 st.sidebar.write("Model files (relative to app.py):")
@@ -208,77 +208,200 @@ def map_label_to_suggestion(label):
 # ------------------------------
 # Prediction history helpers
 # ------------------------------
-def load_history():
-    """Load history CSV if present, otherwise return empty DataFrame."""
-    try:
-        if os.path.exists(history_file):
-            df = pd.read_csv(history_file)
-            # parse datetime-like cols if present
-            for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
-                if c in df.columns:
-                    df[c] = pd.to_datetime(df[c], errors='coerce')
-            return df
-    except Exception:
-        pass
-    return pd.DataFrame()
-
-def save_history(df):
-    try:
-        # ensure directories exist (if path contains dirs)
-        d = os.path.dirname(history_file)
-        if d:
-            os.makedirs(d, exist_ok=True)
-        df.to_csv(history_file, index=False)
-    except Exception as e:
-        st.warning(f"Failed saving history to {history_file}: {e}")
-
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
-    """Mark past predictions as evaluated if their target_time is <= current_fetched_ts and compute correctness."""
+    """
+    Robust evaluation of pending history rows.
+
+    - Normalizes datetimes to Asia/Manila (uses ensure_timestamp_in_manila).
+    - Normalizes tickers to UPPERCASE to match aligned_close_df columns.
+    - Normalizes predicted labels to canonical {'up','down','neutral'}; if ambiguous, sets eval_error and skips evaluation.
+    - Finds pred_price and actual_price using a safe "price at or before timestamp" helper (safer than raw asof).
+    - Marks evaluated only when both prices are available and computes pct_change and correctness using neutral_threshold.
+    - Writes helpful fields: pred_price, actual_price, pct_change, correct (bool/None), checked_at, eval_error.
+    """
     if history_df is None or history_df.empty:
         return history_df
+
+    # ensure useful columns exist
     if 'evaluated' not in history_df.columns:
         history_df['evaluated'] = False
-    history_df['target_time'] = pd.to_datetime(history_df['target_time'], errors='coerce')
-    now_ts = pd.to_datetime(current_fetched_ts)
-    mask = (~history_df['evaluated'].astype(bool)) & (history_df['target_time'].notna()) & (history_df['target_time'] <= now_ts)
-    for idx in history_df[mask].index:
+    for c in ['predicted_at','fetched_last_ts','target_time','checked_at']:
+        if c in history_df.columns:
+            history_df[c] = pd.to_datetime(history_df[c], errors='coerce')
+
+    # copy + normalize aligned_close
+    ac = aligned_close_df.copy()
+    try:
+        ac.index = pd.to_datetime(ac.index)
+    except Exception:
+        pass
+    try:
+        # attempt to put price index into Manila tz (if naive assume UTC)
+        if getattr(ac.index, "tz", None) is None:
+            ac.index = ac.index.tz_localize("UTC").tz_convert(ZoneInfo("Asia/Manila"))
+        else:
+            ac.index = ac.index.tz_convert(ZoneInfo("Asia/Manila"))
+    except Exception:
+        pass
+    ac = ac.sort_index()
+    ac.columns = [str(c).upper() for c in ac.columns]
+
+    # normalize current fetched ts
+    try:
+        now_ts = ensure_timestamp_in_manila(current_fetched_ts)
+    except Exception:
+        now_ts = ensure_timestamp_in_manila(pd.Timestamp.now())
+
+    # helper: robust price at or before timestamp
+    def price_at_or_before(series, when_ts):
+        if series is None or series.empty:
+            return float("nan")
+        try:
+            s = series.copy()
+            s.index = pd.to_datetime(s.index)
+            if getattr(s.index, "tz", None) is None:
+                s.index = s.index.tz_localize("UTC").tz_convert(ZoneInfo("Asia/Manila"))
+            else:
+                s.index = s.index.tz_convert(ZoneInfo("Asia/Manila"))
+        except Exception:
+            s = series.copy()
+
+        # ensure monotonic
+        if not s.index.is_monotonic_increasing:
+            s = s.sort_index()
+
+        when_ts = ensure_timestamp_in_manila(when_ts)
+        # if target earlier than first index -> return first valid value
+        if when_ts < s.index[0]:
+            first_valid = s.dropna()
+            return float(first_valid.iloc[0]) if not first_valid.empty else float("nan")
+
+        sel = s[:when_ts]
+        if sel.empty:
+            return float("nan")
+        v = sel.iloc[-1]
+        return float(v) if pd.notna(v) else float("nan")
+
+    # canonicalize predicted_label strings to 'up'/'down'/'neutral' or None
+    def canonical_label(raw):
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+            return None
+        s = str(raw).strip().lower()
+        # known phrases mapping
+        if s in ('up','buy','long','bull','increase','rise'):
+            return 'up'
+        if s in ('down','sell','short','bear','decrease','fall','drop'):
+            return 'down'
+        if s in ('neutral','hold','no change','flat','unchanged','no reliable consensus','none','n/a','unknown'):
+            return 'neutral'
+        # sometimes stored like "Up" or "UP" or "BUY"
+        if 'up' in s and 'down' not in s:
+            return 'up'
+        if 'down' in s and 'up' not in s:
+            return 'down'
+        if 'hold' in s or 'neutral' in s or 'no reliable' in s:
+            return 'neutral'
+        return None
+
+    # prepare normalized target_time column
+    history_df['_target_norm'] = history_df['target_time'].apply(lambda x: (ensure_timestamp_in_manila(x) if pd.notna(x) else pd.NaT))
+
+    # rows ready for evaluation: not evaluated and target_time <= now_ts
+    mask_ready = (~history_df['evaluated'].astype(bool)) & history_df['_target_norm'].notna() & (history_df['_target_norm'] <= now_ts)
+
+    for idx in history_df[mask_ready].index:
         try:
             row = history_df.loc[idx]
-            t_target = pd.to_datetime(row['target_time'])
-            tk = str(row.get('ticker', '')).upper()
-            if tk not in aligned_close_df.columns:
+            t_target = history_df.at[idx, '_target_norm']
+            tk_raw = row.get('ticker', '')
+            tk = str(tk_raw).upper().strip() if pd.notna(tk_raw) else ''
+            # always stamp checked_at
+            history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo("Asia/Manila"))
+
+            if not tk:
+                history_df.at[idx, 'eval_error'] = "missing_ticker"
                 continue
-            series = aligned_close_df[tk].dropna()
+            if tk not in ac.columns:
+                history_df.at[idx, 'eval_error'] = f"ticker_not_in_price_matrix:{tk}"
+                continue
+
+            series = ac[tk].dropna()
             if series.empty:
+                history_df.at[idx, 'eval_error'] = "no_price_data_for_ticker"
                 continue
-            try:
-                pred_price = float(row['pred_price']) if pd.notna(row.get('pred_price')) else float(series.asof(pd.to_datetime(row['fetched_last_ts'])))
-            except Exception:
-                pred_price = None
-            try:
-                actual_price = float(series.asof(t_target))
-            except Exception:
-                actual_price = None
-            if pred_price is None or actual_price is None or pred_price == 0:
+
+            # canonical predicted label
+            raw_label = row.get('predicted_label', None)
+            pred_label = canonical_label(raw_label)
+            if pred_label is None:
+                history_df.at[idx, 'eval_error'] = f"ambiguous_predicted_label:{raw_label}"
                 continue
-            pct = (actual_price - pred_price) / pred_price
-            pred_label = str(row.get('predicted_label', '')).strip().lower()
-            thr = float(neutral_threshold)
-            correct = False
-            if pred_label == 'up' and pct > 0:
-                correct = True
-            elif pred_label == 'down' and pct < 0:
-                correct = True
-            elif pred_label == 'neutral' and abs(pct) <= thr:
-                correct = True
-            history_df.at[idx, 'evaluated'] = True
-            history_df.at[idx, 'pred_price'] = pred_price
-            history_df.at[idx, 'actual_price'] = actual_price
+
+            # determine pred_price: prefer stored pred_price; else use fetched_last_ts
+            pred_price_val = None
+            if pd.notna(row.get('pred_price')):
+                try:
+                    pred_price_val = float(row.get('pred_price'))
+                except Exception:
+                    pred_price_val = None
+
+            if pred_price_val is None:
+                fetched_ts = row.get('fetched_last_ts')
+                if pd.notna(fetched_ts):
+                    pred_price_val = price_at_or_before(series, fetched_ts)
+                else:
+                    # fallback: price right before target
+                    pred_price_val = price_at_or_before(series, t_target - pd.Timedelta(seconds=1))
+
+            actual_price_val = price_at_or_before(series, t_target)
+
+            # save intermediate found prices (could be nan)
+            history_df.at[idx, 'pred_price'] = (None if pd.isna(pred_price_val) else float(pred_price_val))
+            history_df.at[idx, 'actual_price'] = (None if pd.isna(actual_price_val) else float(actual_price_val))
+
+            if pd.isna(pred_price_val) or pd.isna(actual_price_val):
+                history_df.at[idx, 'eval_error'] = "missing_pred_or_actual_price"
+                history_df.at[idx, 'pct_change'] = None
+                history_df.at[idx, 'correct'] = None
+                continue
+
+            if pred_price_val == 0:
+                history_df.at[idx, 'eval_error'] = "pred_price_zero"
+                history_df.at[idx, 'pct_change'] = None
+                history_df.at[idx, 'correct'] = None
+                continue
+
+            pct = (float(actual_price_val) - float(pred_price_val)) / float(pred_price_val)
             history_df.at[idx, 'pct_change'] = pct
-            history_df.at[idx, 'correct'] = bool(correct)
-            history_df.at[idx, 'checked_at'] = pd.Timestamp.now()
-        except Exception:
+
+            thr = float(neutral_threshold) if 'neutral_threshold' in globals() else 0.002
+
+            # decision rules:
+            is_correct = False
+            if pred_label == 'up':
+                is_correct = (pct > 0)
+            elif pred_label == 'down':
+                is_correct = (pct < 0)
+            elif pred_label == 'neutral':
+                is_correct = (abs(pct) <= thr)
+
+            history_df.at[idx, 'correct'] = bool(is_correct)
+            history_df.at[idx, 'evaluated'] = True
+            history_df.at[idx, 'eval_error'] = None
+
+        except Exception as e:
+            # record error but continue
+            try:
+                history_df.at[idx, 'eval_error'] = f"exception:{str(e)}"
+                history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo("Asia/Manila"))
+            except Exception:
+                pass
             continue
+
+    # cleanup helper column
+    if '_target_norm' in history_df.columns:
+        history_df = history_df.drop(columns=['_target_norm'])
+
     return history_df
 
 # ------------------------------
