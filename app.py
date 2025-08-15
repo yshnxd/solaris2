@@ -516,15 +516,21 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             pct = (float(actual_price_val) - float(pred_price_val)) / float(pred_price_val)
             history_df.at[idx, 'pct_change'] = pct
 
-            thr = float(neutral_threshold) if 'neutral_threshold' in globals() else 0.002
+            thr = float(neutral_threshold) # Use the global neutral_threshold
 
+            # Determine the actual movement category based on the neutral_threshold
+            actual_movement_category = None
+            if pct > thr:
+                actual_movement_category = 'up'
+            elif pct < -thr:
+                actual_movement_category = 'down'
+            else:
+                actual_movement_category = 'neutral'
+
+            # Now compare the predicted label with the actual movement category
             is_correct = False
-            if pred_label == 'up':
-                is_correct = (pct > 0)
-            elif pred_label == 'down':
-                is_correct = (pct < 0)
-            elif pred_label == 'neutral':
-                is_correct = (abs(pct) <= thr)
+            if pred_label == actual_movement_category:
+                is_correct = True
 
             history_df.at[idx, 'correct'] = bool(is_correct)
             history_df.at[idx, 'evaluated'] = True
@@ -1564,12 +1570,12 @@ with tab4:
                 try:
                     pct = float(row.get('pct_change'))
                     thr = float(neutral_threshold)
-                    if abs(pct) <= thr:
-                        actual_move = "NEUTRAL"
-                    elif pct > 0:
+                    if pct > thr:
                         actual_move = "UP"
-                    else:
+                    elif pct < -thr:
                         actual_move = "DOWN"
+                    else:
+                        actual_move = "NEUTRAL" # Correctly classify actual movement
                 except Exception:
                     actual_move = ""
             else:
