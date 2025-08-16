@@ -530,6 +530,273 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             except Exception:
                 pass
             continue
+# Put this into your app (or run it in a notebook where you have aligned_close_df)
+import pandas as pd
+from zoneinfo import ZoneInfo
+import numpy as np
+from pathlib import Path
+
+MANILA = ZoneInfo("Asia/Manila")
+
+def parse_ts_to_manila(x):
+    # robust timestamp normalization -> tz-aware Asia/Manila
+    if pd.isna(x) or x == "":
+        return pd.NaT
+    try:
+        ts = pd.to_datetime(x, errors="coerce")
+        if pd.isna(ts):
+            return pd.NaT
+        # if already tz-aware, convert; if naive, assume Asia/Manila
+        if ts.tzinfo is None or getattr(ts.tz, 'zone', None) is None:
+            return ts.tz_localize(MANILA)
+        else:
+            return ts.tz_convert(MANILA)
+    except Exception:
+        return pd.NaT
+
+def parse_interval_to_timedelta(interval):
+    # accepts things like '60m' or '60.0m' or '1h' or '1d'
+    if interval is None:
+        return pd.Timedelta(hours=1)
+    s = str(interval).strip().lower()
+    # remove trailing ".0" if present
+    s = s.replace(".0", "")
+    try:
+        if s.endswith("m"):
+            mins = float(s[:-1])
+            return pd.Timedelta(minutes=mins)
+        if s.endswith("h"):
+            hrs = float(s[:-1])
+            return pd.Timedelta(hours=hrs)
+        if s.endswith("d"):
+            days = float(s[:-1])
+            return pd.Timedelta(days=days)
+        # fallback: try pandas to_timedelta
+        return pd.to_timedelta(s)
+    except Exception:
+        return pd.Timedelta(hours=1)
+
+def price_at_or_before(series, when_ts):
+    # series: pd.Series indexed by tz-aware timestamps (assumed Manila or convertible).
+    # when_ts: tz-aware Timestamp in Manila.
+    if series is None or series.empty or pd.isna(when_ts):
+        return np.nan
+    s = series.copy()
+    try:
+        s.index = pd.to_datetime(s.index)
+    except Exception:
+        pass
+    # If series tz-naive, assume it's Manila
+    try:
+        if getattr(s.index, 'tz', None) is None:
+            s.index = s.index.tz_localize(MANILA)
+        else:
+            s.index = s.index.tz_convert(MANILA)
+    except Exception:
+        pass
+    s = s.sort_index()
+    # if when_ts before first index, return first valid value
+    if when_ts < s.index[0]:
+        non_na = s.dropna()
+        return non_na.iloc[0] if not non_na.empty else np.nan
+    # use asof (will return last index <= when_ts)
+    try:
+        val = s.asof(when_ts)
+        if pd.notna(val):
+            return float(val)
+    except Exception:
+        pass
+    # fallback: take last value up to when_ts
+    try:
+        sel = s.loc[:when_ts]
+        if not sel.empty:
+            return float(sel.iloc[-1])
+    except Exception:
+        pass
+    return np.nan
+
+def recompute_history_evaluations(history_csv_path, aligned_close_df, save_back=True):
+    """
+    history_csv_path: path to CSV (string or Path) or a DataFrame
+    aligned_close_df: DataFrame of close prices, indexed by timestamp (can be tz-naive or tz-aware)
+    """
+    # read history
+    if isinstance(history_csv_path, (str, Path)):
+        df = pd.read_csv(history_csv_path, dtype=str)
+    else:
+        df = history_csv_path.copy()
+
+    # canonicalize column names if needed
+    # parse timestamps
+    for c in ['predicted_at','fetched_last_ts','target_time','checked_at']:
+        if c in df.columns:
+            df[c] = df[c].replace("", pd.NA)
+            df[c] = df[c].apply(parse_ts_to_manila)
+
+    # ensure interval col exists
+    if 'interval' not in df.columns:
+        df['interval'] = '60m'
+
+    # normalize aligned_close_df index to Manila
+    ac = aligned_close_df.copy()
+    try:
+        ac.index = pd.to_datetime(ac.index)
+    except Exception:
+        pass
+    try:
+        if getattr(ac.index, 'tz', None) is None:
+            ac.index = ac.index.tz_localize("UTC").tz_convert(MANILA)
+        else:
+            ac.index = ac.index.tz_convert(MANILA)
+    except Exception:
+        # if fails, don't convert
+        pass
+    ac = ac.sort_index()
+    ac.columns = [str(c).upper() for c in ac.columns]
+
+    now = pd.Timestamp.now(tz=MANILA)
+    data_max_ts = ac.index.max() if not ac.empty else pd.NaT
+
+    # iterate rows and recompute cleanly
+    out_rows = []
+    for i, row in df.iterrows():
+        r = row.to_dict()
+        # normalize ticker
+        tk = r.get('ticker', '')
+        if pd.isna(tk):
+            tk = ''
+        tk = str(tk).upper().strip()
+        r['ticker'] = tk
+
+        # interval
+        iv_td = parse_interval_to_timedelta(r.get('interval', '60m'))
+
+        # predicted time preference
+        pred_time = r.get('predicted_at')
+        if pd.isna(pred_time):
+            pred_time = r.get('fetched_last_ts')
+        if pd.isna(pred_time):
+            # fallback: assume now minus one interval
+            pred_time = now - iv_td
+
+        # ensure pred_time tz-aware
+        if not pd.isna(pred_time) and pred_time.tzinfo is None:
+            pred_time = pred_time.tz_localize(MANILA)
+        r['predicted_at'] = pred_time
+
+        # target_time: if present parse; else compute from predicted_at + interval
+        tgt = r.get('target_time')
+        if pd.isna(tgt):
+            # compute target_time as predicted_at + interval (rounded up to interval)
+            tgt = pred_time + iv_td
+        if tgt.tzinfo is None:
+            tgt = tgt.tz_localize(MANILA)
+        r['target_time'] = tgt
+
+        # price series for ticker
+        if tk == '' or tk not in ac.columns:
+            # can't resolve prices
+            r['pred_price'] = np.nan
+            r['actual_price'] = np.nan
+            r['pct_change'] = np.nan
+            r['evaluated'] = False
+            r['checked_at'] = pd.Timestamp.now(tz=MANILA)
+            r['eval_error'] = f"ticker_not_in_price_matrix:{tk}" if tk != '' else "missing_ticker"
+            out_rows.append(r)
+            continue
+
+        series = ac[tk].dropna()
+        if series.empty:
+            r['pred_price'] = np.nan
+            r['actual_price'] = np.nan
+            r['pct_change'] = np.nan
+            r['evaluated'] = False
+            r['checked_at'] = pd.Timestamp.now(tz=MANILA)
+            r['eval_error'] = "no_price_data_for_ticker"
+            out_rows.append(r)
+            continue
+
+        # recompute pred_price (prefer stored pred_price only if you want to keep it)
+        computed_pred_price = price_at_or_before(series, pred_time)
+        r['pred_price'] = float(r['pred_price']) if (('pred_price' in r) and pd.notna(r['pred_price'])) else (computed_pred_price if not pd.isna(computed_pred_price) else np.nan)
+
+        # compute actual_price only if series has data up to target_time
+        if not pd.isna(data_max_ts) and data_max_ts >= tgt:
+            actual_price = price_at_or_before(series, tgt)
+            r['actual_price'] = float(actual_price) if not pd.isna(actual_price) else np.nan
+        else:
+            r['actual_price'] = np.nan
+
+        # decide evaluation: only if now >= target_time AND actual_price available
+        if (not pd.isna(r['actual_price'])) and (now >= tgt):
+            # compute pct
+            try:
+                if r['pred_price'] == 0 or pd.isna(r['pred_price']):
+                    r['pct_change'] = np.nan
+                    r['correct'] = None
+                    r['eval_error'] = 'pred_price_zero_or_na'
+                    r['evaluated'] = False
+                else:
+                    pct = (float(r['actual_price']) - float(r['pred_price'])) / float(r['pred_price'])
+                    # treat extremely small numeric noise as zero
+                    if abs(pct) < 1e-12:
+                        pct = 0.0
+                    r['pct_change'] = pct
+
+                    # neutral threshold: derive window from interval (approx 24h window)
+                    bars_in_24h = max(1, int(24*3600 / max(1, iv_td.total_seconds())))
+                    rolling_vol = series.pct_change().rolling(window=bars_in_24h, min_periods=1).std()
+                    # choose vol ref time as pred_time or fetched_last_ts
+                    vol_ref = pred_time if not pd.isna(pred_time) else (r.get('fetched_last_ts') if not pd.isna(r.get('fetched_last_ts')) else tgt - pd.Timedelta(seconds=1))
+                    vol_val = rolling_vol.asof(vol_ref)
+                    if pd.isna(vol_val) or vol_val == 0:
+                        thr = 0.002
+                    else:
+                        thr = float(vol_val) * 0.5
+                    r['neutral_threshold_used'] = thr
+
+                    # canonicalize predicted label -- simple mapping
+                    lab = str(r.get('predicted_label', '')).strip().lower()
+                    if lab.startswith('u') or lab.startswith('b'):
+                        pred_cat = 'up'
+                    elif lab.startswith('d') or lab.startswith('s'):
+                        pred_cat = 'down'
+                    else:
+                        pred_cat = 'neutral'
+                    r['predicted_label_canonical'] = pred_cat
+
+                    if pct > thr:
+                        actual_cat = 'up'
+                    elif pct < -thr:
+                        actual_cat = 'down'
+                    else:
+                        actual_cat = 'neutral'
+
+                    r['correct'] = (pred_cat == actual_cat)
+                    r['evaluated'] = True
+                    r['eval_error'] = ""
+            except Exception as e:
+                r['pct_change'] = np.nan
+                r['correct'] = None
+                r['evaluated'] = False
+                r['eval_error'] = f"exception:{e}"
+        else:
+            # not ready to evaluate (target_time in future or no actual price in ac)
+            r['pct_change'] = np.nan
+            r['correct'] = None
+            r['evaluated'] = False
+            r['eval_error'] = "not_enough_price_data_or_target_in_future"
+
+        r['checked_at'] = pd.Timestamp.now(tz=MANILA)
+        out_rows.append(r)
+
+    out_df = pd.DataFrame(out_rows, columns=df.columns.tolist() + ['predicted_label_canonical','neutral_threshold_used','pred_price','actual_price','pct_change','correct','evaluated','checked_at','eval_error'])
+    # de-duplicate columns that already exist
+    out_df = out_df.loc[:, ~out_df.columns.duplicated()]
+
+    if save_back and isinstance(history_csv_path, (str, Path)):
+        out_df.to_csv(history_csv_path, index=False)
+    return out_df
 
     # cleanup helper cols
     if '_target_norm' in history_df.columns:
