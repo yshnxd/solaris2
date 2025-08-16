@@ -357,13 +357,13 @@ def price_at_or_before(series: pd.Series, when_ts: pd.Timestamp):
 
 
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
-    \"\"\"Evaluate unevaluated rows in history_df using aligned_close_df price data.
+    """Evaluate unevaluated rows in history_df using aligned_close_df price data.
     This function evaluates only rows whose target_time <= now (Manila) and that aren't
     too recent (safety buffer) to avoid immediate evaluation of predictions made milliseconds ago.
     It prefers 'pred_price' if stored, else looks up price at 'predicted_at', then falls back to
     fetched_last_ts or the price just before target_time.
     Neutral threshold (volatility) window is derived from the prediction interval to scale properly.
-    \"\"\"
+    """
     if history_df is None or history_df.empty:
         return history_df
 
@@ -1158,16 +1158,16 @@ if run_button:
             pred_price = None
             thr_used = 0.002
         try:
-    delta = interval_to_timedelta(interval)
-    # Use the clock-based next interval (safer), but ensure it's strictly in the future
-    real_next = compute_real_next_time_now(interval)
-    now_manila = ensure_timestamp_in_manila(pd.Timestamp.now())
-    target_time_from_fetch = real_next
-    # If real_next is already <= now (rare), then push forward by deltas until it's in the future
-    while target_time_from_fetch <= now_manila:
-        target_time_from_fetch = target_time_from_fetch + delta
-except Exception:
-    target_time_from_fetch = compute_real_next_time_now(interval)
+            delta = interval_to_timedelta(interval)
+            # Use the clock-based next interval (safer), but ensure it is strictly in the future
+            real_next = compute_real_next_time_now(interval)
+            now_manila = ensure_timestamp_in_manila(pd.Timestamp.now())
+            target_time_from_fetch = real_next
+            # If real_next is already <= now (rare), then push forward by deltas until it is in the future
+            while target_time_from_fetch <= now_manila:
+                target_time_from_fetch = target_time_from_fetch + delta
+        except Exception:
+            target_time_from_fetch = compute_real_next_time_now(interval)
 
         try:
             pred_label_canon = canonical_label(con_label)
