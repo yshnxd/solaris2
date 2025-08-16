@@ -1815,3 +1815,19 @@ def recompute_history_evaluations(history_df, aligned_close_df, save_back=False,
     if save_back and path_if_saving:
         out_df.to_csv(path_if_saving, index=False)
     return out_df
+
+
+# --- Auto-repair history before showing recent predictions ---
+if history is not None and not history.empty:
+    try:
+        history = recompute_history_evaluations(history, aligned_close_for_eval, save_back=False)
+    except Exception as e:
+        st.error(f"Repairing history failed: {e}")
+
+# --- Manual repair button ---
+if st.button("🔧 Repair History Now"):
+    try:
+        history = recompute_history_evaluations(history, aligned_close_for_eval, save_back=True, path_if_saving="history.csv")
+        st.success("History CSV has been repaired and saved.")
+    except Exception as e:
+        st.error(f"Manual repair failed: {e}")
