@@ -1,4 +1,4 @@
-# app.py - SOLARIS — Stock Price Movement Predictor (Revised: safer loading, cached downloads, robust history eval, VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD)
+# app.py - SOLARIS — Stock Price Movement Predictor (Revised: safer loading, cached downloads, robust history eval, VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD, correct deferred evaluation)
 import os
 import tempfile
 import warnings
@@ -17,13 +17,11 @@ from datetime import datetime, timedelta
 try:
     from zoneinfo import ZoneInfo     # Python 3.9+
 except Exception:
-    # fallback (keeps usage same elsewhere)
     from pytz import timezone as ZoneInfo
 
 import random, tensorflow as tf
 from pathlib import Path
 
-# reproducibility
 SEED = 42
 np.random.seed(SEED)
 random.seed(SEED)
@@ -41,7 +39,6 @@ ticker = st.sidebar.text_input("Ticker (any Yahoo Finance symbol)", "AAPL")
 ticker = ticker.strip().upper()
 
 sequence_length = st.sidebar.number_input("Sequence length (LSTM/CNN)", min_value=3, max_value=240, value=24, step=1)
-
 interval = st.sidebar.selectbox("Interval", ["60m"], index=0)
 period_default = "90d" if interval == "60m" else "90d"
 period = st.sidebar.text_input("Period (try 90d, 365d, or 729d)", period_default)
@@ -59,18 +56,13 @@ label_map = [s.strip().lower() for s in label_map_input.split(",")]
 prob_threshold = st.sidebar.slider("Prob threshold for confident class", 0.05, 0.95, 0.5, 0.05)
 models_to_run = st.sidebar.multiselect("Models to run", ["cnn", "lstm", "xgb", "meta"], default=["cnn", "lstm", "xgb", "meta"])
 run_button = st.sidebar.button("Fetch live data & predict NEXT interval (real-time)")
-
 history_file = st.sidebar.text_input("History CSV file", "predictions_history.csv")
 
-# muted colors (for conclusive box background)
 COLOR_BUY_BG = "#d7e9da"   # soft green
 COLOR_SELL_BG = "#f0e5e6"  # soft rose
 COLOR_HOLD_BG = "#f3f4f6"  # soft gray
 COLOR_TEXT = "#111111"
 
-# ------------------------------
-# Helpers (safe loaders, cached downloads, timezone helpers, atomic save, label handling)
-# ------------------------------
 def warn(msg):
     try:
         st.warning(msg)
@@ -79,21 +71,13 @@ def warn(msg):
 
 @st.cache_resource(show_spinner=False)
 def load_model_safe(path: str):
-    """
-    Robust model loader:
-     - try joblib.load (sklearn/xgboost)
-     - fallback to tf.keras.models.load_model for SavedModel or .h5
-    """
     if not path or not os.path.exists(path):
         warn(f"Model file not found: {path}")
         return None
-
-    # try joblib first
     try:
         mod = joblib.load(path)
         return mod
     except Exception as e_joblib:
-        # try Keras loader
         try:
             from tensorflow.keras.models import load_model as keras_load_model
             try:
@@ -108,10 +92,6 @@ def load_model_safe(path: str):
 
 @st.cache_data(ttl=30, show_spinner=False)
 def download_price_cached(ticker: str, interval: str, period: str = None, start=None, end=None, use_tk_history=False):
-    """
-    Cached wrapper around yfinance downloads.
-    If use_tk_history=True, tries Ticker.history (useful for intraday 1m).
-    """
     try:
         if use_tk_history:
             tk = yf.Ticker(ticker)
@@ -134,9 +114,6 @@ def download_price_cached(ticker: str, interval: str, period: str = None, start=
         return pd.DataFrame()
 
 def save_history_atomic(df: pd.DataFrame, target_path: str):
-    """
-    Atomic CSV write: write to temp file then replace original.
-    """
     try:
         p = Path(target_path)
         if p.parent:
@@ -147,7 +124,6 @@ def save_history_atomic(df: pd.DataFrame, target_path: str):
         os.replace(tmp_name, str(p))
     except Exception as e:
         warn(f"Failed to save history atomically to {target_path}: {e}")
-        # fallback
         try:
             df.to_csv(target_path, index=False)
         except Exception as e2:
@@ -169,7 +145,6 @@ def get_n_features(mod):
     inp = getattr(mod, "input_shape", None)
     if inp is not None:
         try:
-            # Keras shapes: (None, timesteps, features) or (None, features)
             if isinstance(inp, tuple):
                 return int(inp[-1])
             if isinstance(inp, (list, tuple)):
@@ -195,46 +170,37 @@ def align_seq_df_to_names(seq_df, expected_names):
     return X[expected_names]
 
 def ensure_timestamp_in_manila(ts):
-    """
-    Return tz-aware Timestamp in Asia/Manila.
-    If ts is tz-naive assume UTC then convert to Manila.
-    """
     try:
         tz = ZoneInfo("Asia/Manila")
     except Exception:
-        # Fallback for older Python versions or environments without zoneinfo
         from pytz import timezone
         tz = timezone("Asia/Manila")
 
     ts = pd.to_datetime(ts, errors='coerce')
     if pd.isna(ts):
-        return pd.Timestamp.now(tz=tz) # Ensure now() is also tz-aware
+        return pd.Timestamp.now(tz=tz)
     if getattr(ts, "tzinfo", None) is None:
         try:
-            # Assume UTC if naive, then convert
             ts = ts.tz_localize("UTC", ambiguous='infer').tz_convert(tz)
         except Exception:
             try:
-                # If UTC localize fails, try localizing directly to Manila
                 ts = ts.tz_localize(tz, ambiguous='infer')
             except Exception:
-                pass # Keep as is if all fails, but this is less ideal
+                pass
     else:
         try:
             ts = ts.tz_convert(tz)
         except Exception:
-            pass # Keep as is if conversion fails
+            pass
     return ts
 
 def compute_real_next_time_now(interval):
-    """Return next interval timestamp based on Asia/Manila current clock (tz-aware)."""
     try:
         tz = ZoneInfo("Asia/Manila")
     except Exception:
         from pytz import timezone
         tz = timezone("Asia/Manila")
     now = datetime.now(tz)
-
     if isinstance(interval, str) and interval.endswith("m"):
         try:
             mins = int(interval[:-1])
@@ -245,19 +211,16 @@ def compute_real_next_time_now(interval):
             else:
                 delta_min = mins - remainder
                 next_ts = (now.replace(second=0, microsecond=0) + timedelta(minutes=delta_min))
-            # Ensure the returned Timestamp is tz-aware Manila
             return pd.Timestamp(next_ts).tz_localize(tz) if getattr(pd.Timestamp(next_ts), "tzinfo", None) is None else pd.Timestamp(next_ts).tz_convert(tz)
         except Exception:
             return pd.Timestamp(now).tz_localize(tz)
     if interval == "1d":
         next_day = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
         return pd.Timestamp(next_day).tz_localize(tz)
-    # fallback
     next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
     return pd.Timestamp(next_hour).tz_localize(tz)
 
 def interval_to_timedelta(interval):
-    """Convert interval string (e.g., '60m','1d','30m','2h') to a timedelta."""
     if isinstance(interval, str):
         iv = interval.strip().lower()
         if iv.endswith('m'):
@@ -278,7 +241,6 @@ def interval_to_timedelta(interval):
                 return timedelta(days=days)
             except Exception:
                 return timedelta(days=1)
-    # default
     return timedelta(hours=1)
 
 def map_label_to_suggestion(label):
@@ -290,7 +252,6 @@ def map_label_to_suggestion(label):
     return "Hold"
 
 def canonical_label(raw):
-    """Normalize many possible label text -> 'up'|'down'|'neutral' or None"""
     if raw is None or (isinstance(raw, float) and pd.isna(raw)):
         return None
     s = str(raw).strip().lower()
@@ -309,13 +270,6 @@ def canonical_label(raw):
     return None
 
 def label_from_model(mod, X_for_proba=None):
-    """
-    Robust label extraction:
-    - prefer predict_proba (sklearn)
-    - handle keras predict (probability vector or class index)
-    Returns (label_str, top_prob (0..1), probs_or_raw)
-    """
-    # sklearn style
     if hasattr(mod, "predict_proba") and X_for_proba is not None:
         try:
             probs = mod.predict_proba(X_for_proba)
@@ -335,7 +289,6 @@ def label_from_model(mod, X_for_proba=None):
         except Exception:
             pass
 
-    # fallback: use predict (could be class index or probabilities)
     try:
         pred = mod.predict(X_for_proba if X_for_proba is not None else None)
     except Exception:
@@ -345,7 +298,6 @@ def label_from_model(mod, X_for_proba=None):
             return ("unknown", 0.0, str(e))
 
     pred = np.asarray(pred)
-    # probabilities case: (1, n_classes)
     if pred.ndim == 2 and pred.shape[0] == 1 and pred.shape[1] >= 2:
         p = pred.ravel()
         top_idx = int(np.argmax(p))
@@ -356,8 +308,6 @@ def label_from_model(mod, X_for_proba=None):
             neutral_idx = next((i for i, l in enumerate(label_map) if l.lower() == "neutral"), None)
             lab = label_map[neutral_idx] if neutral_idx is not None else (label_map[top_idx] if top_idx < len(label_map) else str(top_idx))
         return lab, top_prob, p.tolist()
-
-    # numeric class label returned
     try:
         v = int(np.ravel(pred)[0])
         lab = label_map[v] if v < len(label_map) else str(v)
@@ -365,15 +315,10 @@ def label_from_model(mod, X_for_proba=None):
     except Exception:
         return (str(pred), 0.0, pred.tolist() if hasattr(pred, "tolist") else str(pred))
 
-# ------------------------------
-# Prediction history helpers (load/save/eval)
-# ------------------------------
 def load_history():
-    """Load history CSV if present, otherwise return empty DataFrame."""
     try:
         if os.path.exists(history_file):
             df = pd.read_csv(history_file)
-            # parse datetime-like cols if present
             for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
                 if c in df.columns:
                     df[c] = pd.to_datetime(df[c], errors='coerce')
@@ -386,14 +331,8 @@ def save_history(df):
     save_history_atomic(df, history_file)
 
 def price_at_or_before(series: pd.Series, when_ts: pd.Timestamp):
-    """
-    Robustly get the price from a series at or before a given timestamp.
-    Ensures series index and target timestamp are timezone-aware Manila.
-    """
     if series is None or series.empty:
         return float("nan")
-
-    # Ensure series index is datetime and tz-aware Manila
     try:
         s = series.copy()
         s.index = pd.to_datetime(s.index)
@@ -403,52 +342,27 @@ def price_at_or_before(series: pd.Series, when_ts: pd.Timestamp):
             s.index = s.index.tz_convert(ZoneInfo("Asia/Manila"))
     except Exception as e:
         warn(f"Could not localize/convert series index to Manila TZ for price lookup: {e}")
-        s = series.copy() # Use as is, might be naive or wrong tz
-        s.index = pd.to_datetime(s.index) # Ensure datetime index
-
+        s = series.copy()
+        s.index = pd.to_datetime(s.index)
     if not s.index.is_monotonic_increasing:
         s = s.sort_index()
-
-    when_ts = ensure_timestamp_in_manila(when_ts) # Ensure target timestamp is also Manila TZ
-
-    # Use asof for robust lookup
+    when_ts = ensure_timestamp_in_manila(when_ts)
     val = s.asof(when_ts)
     if pd.notna(val):
         return float(val)
-
-    # Fallback if asof doesn't find an exact match or prior
-    # If when_ts is before the first available data, take the first valid price
     if when_ts < s.index[0]:
         first_valid = s.dropna()
         return float(first_valid.iloc[0]) if not first_valid.empty else float("nan")
-
-    # If asof failed and it's not before the first, it means no data at or before.
-    # This might indicate a gap or an issue with the data itself.
     return float("nan")
 
-
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
-    """
-    Robust evaluation of pending history rows.
-
-    - Normalizes datetimes to Asia/Manila (uses ensure_timestamp_in_manila).
-    - Normalizes tickers to UPPERCASE to match aligned_close_df columns.
-    - Normalizes predicted labels to canonical {'up','down','neutral'}; if ambiguous, sets eval_error and skips evaluation.
-    - Finds pred_price and actual_price using a safe "price at or before timestamp" helper.
-    - Marks evaluated only when both prices are available and computes pct_change and correctness using volatility-adaptive neutral_threshold.
-    - Writes helpful fields: pred_price, actual_price, pct_change, correct (bool/None), checked_at, eval_error, neutral_threshold_used.
-    """
     if history_df is None or history_df.empty:
         return history_df
-
-    # ensure useful columns exist
     if 'evaluated' not in history_df.columns:
         history_df['evaluated'] = False
     for c in ['predicted_at','fetched_last_ts','target_time','checked_at']:
         if c in history_df.columns:
             history_df[c] = pd.to_datetime(history_df[c], errors='coerce')
-
-    # copy + normalize aligned_close
     ac = aligned_close_df.copy()
     try:
         ac.index = pd.to_datetime(ac.index)
@@ -463,16 +377,13 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
         pass
     ac = ac.sort_index()
     ac.columns = [str(c).upper() for c in ac.columns]
-
     try:
         now_ts = ensure_timestamp_in_manila(current_fetched_ts)
     except Exception:
         now_ts = ensure_timestamp_in_manila(pd.Timestamp.now())
-
     history_df['_target_norm'] = history_df['target_time'].apply(lambda x: (ensure_timestamp_in_manila(x) if pd.notna(x) else pd.NaT))
-
-    mask_ready = (~history_df['evaluated'].astype(bool)) & history_df['_target_norm'].notna() & (history_df['_target_norm'] <= now_ts)
-
+    # ----------- FIX: Only evaluate if target_time is *strictly less* than now_ts -----------
+    mask_ready = (~history_df['evaluated'].astype(bool)) & history_df['_target_norm'].notna() & (history_df['_target_norm'] < now_ts)
     for idx in history_df[mask_ready].index:
         try:
             row = history_df.loc[idx]
@@ -480,134 +391,90 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
             tk_raw = row.get('ticker', '')
             tk = str(tk_raw).upper().strip() if pd.notna(tk_raw) else ''
             history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo("Asia/Manila"))
-
             if not tk:
                 history_df.at[idx, 'eval_error'] = "missing_ticker"
                 continue
             if tk not in ac.columns:
                 history_df.at[idx, 'eval_error'] = f"ticker_not_in_price_matrix:{tk}"
                 continue
-
             series = ac[tk].dropna()
             if series.empty:
                 history_df.at[idx, 'eval_error'] = "no_price_data_for_ticker"
                 continue
-
-            # Use canonical predicted label preferentially if stored, else derive from predicted_label
-            raw_label = None
-            if 'predicted_label_canonical' in history_df.columns and pd.notna(history_df.at[idx, 'predicted_label_canonical']):
-                raw_label = history_df.at[idx, 'predicted_label_canonical']
-            else:
-                raw_label = row.get('predicted_label', None)
-
+            raw_label = row.get('predicted_label', None)
             pred_label = canonical_label(raw_label)
             if pred_label is None:
                 history_df.at[idx, 'eval_error'] = f"ambiguous_predicted_label:{raw_label}"
                 continue
-
-            # Prioritize the already recorded pred_price if it exists and is valid
             pred_price_val = None
             if pd.notna(row.get('pred_price')):
                 try:
                     pred_price_val = float(row.get('pred_price'))
                 except Exception:
-                    pred_price_val = None # Invalid recorded price
-
-            # If recorded pred_price is missing or invalid, try to derive it from fetched_last_ts
+                    pred_price_val = None
             if pred_price_val is None:
                 fetched_ts = row.get('fetched_last_ts')
                 if pd.notna(fetched_ts):
                     pred_price_val = price_at_or_before(series, fetched_ts)
                 else:
-                    # Fallback if fetched_last_ts is also missing, try just before target_time
                     pred_price_val = price_at_or_before(series, t_target - pd.Timedelta(seconds=1))
-
-
             actual_price_val = price_at_or_before(series, t_target)
-
             history_df.at[idx, 'pred_price'] = (None if pd.isna(pred_price_val) else float(pred_price_val))
             history_df.at[idx, 'actual_price'] = (None if pd.isna(actual_price_val) else float(actual_price_val))
-
             if pd.isna(pred_price_val) or pd.isna(actual_price_val):
                 history_df.at[idx, 'eval_error'] = "missing_pred_or_actual_price_for_eval"
                 history_df.at[idx, 'pct_change'] = None
                 history_df.at[idx, 'correct'] = None
                 continue
-
             if pred_price_val == 0:
                 history_df.at[idx, 'eval_error'] = "pred_price_zero"
                 history_df.at[idx, 'pct_change'] = None
                 history_df.at[idx, 'correct'] = None
                 continue
-
             pct = (float(actual_price_val) - float(pred_price_val)) / float(pred_price_val)
             history_df.at[idx, 'pct_change'] = pct
-
-            # --- VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD LOGIC ---
-            # Calculate rolling volatility for the specific ticker's series
-            # Use a window that makes sense for the interval, e.g., 24 for 60m (24 hours)
-            # Ensure there's enough data for rolling calculation
             rolling_vol = series.pct_change().rolling(window=24, min_periods=1).std()
-            # Get the volatility at the point of prediction (or latest available before target)
-            # Use asof to get the volatility value corresponding to the fetched_last_ts
             vol_at_prediction = rolling_vol.asof(ensure_timestamp_in_manila(row.get('fetched_last_ts')))
-            
-            # If volatility is NaN (not enough data) or zero, use a small default threshold
             if pd.isna(vol_at_prediction) or vol_at_prediction == 0:
-                thr = 0.002 # A small default, e.g., 0.2%
+                thr = 0.002
             else:
-                thr = vol_at_prediction * 0.5 # As per notebook design
-
-            # Persist neutral threshold used for reproducibility and display
+                thr = vol_at_prediction * 0.5
             history_df.at[idx, 'neutral_threshold_used'] = float(thr)
-
-            # Determine the actual movement category based on the dynamic threshold
             actual_movement_category = None
             if pct > thr:
                 actual_movement_category = 'up'
             elif pct < -thr:
                 actual_movement_category = 'down'
-            else: # -thr <= pct <= thr
+            else:
                 actual_movement_category = 'neutral'
-
-            # Now compare the predicted label with the actual movement category
             is_correct = False
             if pred_label == actual_movement_category:
                 is_correct = True
-
             history_df.at[idx, 'correct'] = bool(is_correct)
             history_df.at[idx, 'evaluated'] = True
             history_df.at[idx, 'eval_error'] = None
-
         except Exception as e:
             try:
-                history_df.at[idx, 'eval_error'] = f"exception_during_eval:{str(e)}" # More specific error
+                history_df.at[idx, 'eval_error'] = f"exception_during_eval:{str(e)}"
                 history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo("Asia/Manila"))
             except Exception:
                 pass
             continue
-
     if '_target_norm' in history_df.columns:
         history_df = history_df.drop(columns=['_target_norm'])
-
     return history_df
 
-# ------------------------------
-# Tabs
-# ------------------------------
 tab1, tab2, tab3, tab4 = st.tabs(["Live Market View", "Predictions", "Detailed Analysis", "History Predictions"])
 
 # ------------------------------
 # Run pipeline
 # ------------------------------
 if run_button:
-    # 1) download data (transient spinner) for modeling & history eval
     with st.spinner("Downloading latest market data (transient)..."):
         needed = {ticker, "SPY", "QQQ", "NVDA"}
         raw = {}
         for t in needed:
             try:
-                # cached download
                 df = download_price_cached(t, interval=interval, period=period)
                 if df is None or df.empty:
                     continue
@@ -620,39 +487,29 @@ if run_button:
         st.error(f"No data for {ticker}. Try increasing period or check connectivity.")
         st.stop()
 
-    # Align close prices using base index; keep original tz info where possible
     base_idx = raw[ticker].index
     aligned_close = pd.DataFrame(index=base_idx)
     for t, df in raw.items():
         aligned_close[t] = df.reindex(base_idx)["Close"]
 
-    # fetched latest timestamp (may be tz-aware or naive)
     fetched_last_ts = base_idx[-1]
     fetched_last_ts_manila = ensure_timestamp_in_manila(fetched_last_ts)
-
-    # compute real next interval from clock (for display only)
     real_next_time = compute_real_next_time_now(interval)
-
-    # compute now in Manila
     try:
         tz_manila = ZoneInfo("Asia/Manila")
     except Exception:
         from pytz import timezone
         tz_manila = timezone("Asia/Manila")
     now_manila = datetime.now(tz_manila)
-
-    # compute age safely (both tz-aware)
     try:
         age_secs = (now_manila - fetched_last_ts_manila).total_seconds()
     except Exception:
         age_secs = (now_manila.replace(tzinfo=None) - pd.to_datetime(fetched_last_ts_manila).replace(tzinfo=None)).total_seconds()
-
-    # determine staleness: allow tolerance of 1.5 intervals
     interval_seconds = 3600 if interval == "60m" else 86400
     tolerance = interval_seconds * 1.5
     data_is_stale = age_secs > tolerance
 
-    # --- load and evaluate past history (if any) ---
+    # ----------- FIX: DO NOT instantly evaluate after prediction, only evaluate past history -----------
     try:
         history = load_history()
         history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
@@ -660,7 +517,6 @@ if run_button:
     except Exception as e:
         warn(f"History evaluation failed: {e}")
 
-    # Build features for chosen ticker
     def build_features(aligned_close_df, raw_dict, tgt):
         aligned_ffill = aligned_close_df.ffill()
         price = aligned_ffill[tgt]
@@ -701,9 +557,6 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
-    # ------------------------------
-    # Live Market View tab (updated: single-line intraday "trading" chart)
-    # ------------------------------
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
@@ -712,7 +565,6 @@ if run_button:
         if data_is_stale:
             st.caption("Note: fetched market data is stale relative to the real-time clock and may lag real-time.")
 
-        # we attempt to fetch intraday 1m (cached path)
         intraday_df = pd.DataFrame()
         try:
             with st.spinner("Fetching intraday ticks (1m granularity, cached)..."):
@@ -721,8 +573,7 @@ if run_button:
                 intraday_df = raw.get(ticker, pd.DataFrame()).copy()
         except Exception:
             intraday_df = raw.get(ticker, pd.DataFrame()).copy()
-
-        chart_df = intraday_df.copy()  # expose to Detailed Analysis later
+        chart_df = intraday_df.copy()
         if chart_df is None or chart_df.empty:
             st.info("Intraday tick data not available to draw the realtime line chart.")
         else:
@@ -730,7 +581,6 @@ if run_button:
                 chart_df.index = pd.to_datetime(chart_df.index)
             except Exception:
                 pass
-
             price_series = chart_df['Close'].ffill().dropna()
             if price_series.empty:
                 st.info("No intraday close prices available.")
@@ -747,10 +597,8 @@ if run_button:
                         prev_close = float(price_series.iloc[0])
                     except Exception:
                         prev_close = None
-
                 current_price = float(price_series.iloc[-1])
                 current_time = price_series.index[-1]
-
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=price_series.index,
@@ -759,7 +607,6 @@ if run_button:
                     name=f"{ticker} Price",
                     line=dict(width=2, color="#00E5FF")
                 ))
-
                 try:
                     fig.add_hline(
                         y=current_price,
@@ -771,7 +618,6 @@ if run_button:
                     )
                 except Exception:
                     pass
-
                 if prev_close is not None:
                     try:
                         fig.add_hline(
@@ -784,7 +630,6 @@ if run_button:
                         )
                     except Exception:
                         pass
-
                 fig.add_trace(go.Scatter(
                     x=[current_time],
                     y=[current_price],
@@ -792,7 +637,6 @@ if run_button:
                     marker=dict(color='red', size=8),
                     name='Current Price'
                 ))
-
                 fig.update_layout(
                     plot_bgcolor="#0b1020",
                     paper_bgcolor="#0b1020",
@@ -802,10 +646,8 @@ if run_button:
                     margin=dict(l=10, r=10, t=30, b=30),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-
                 fig.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.06)", gridwidth=1, zeroline=False, color="white")
                 fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.06)", gridwidth=1, zeroline=False, color="white")
-
                 fig.update_xaxes(
                     rangeselector=dict(
                         buttons=list([
@@ -819,10 +661,8 @@ if run_button:
                     ),
                     rangeslider=dict(visible=False)
                 )
-
                 st.plotly_chart(fig, use_container_width=True)
 
-    # Load models
     with st.spinner("Loading models (transient)..."):
         file_map = {"cnn": cnn_path, "lstm": lstm_path, "xgb": xgb_path, "meta": meta_path}
         loaded = {}
@@ -842,11 +682,9 @@ if run_button:
         st.error("No models loaded. Place .pkl files next to app.py or correct paths.")
         st.stop()
 
-    # prepare last_row and seq_df
     last_row = feat_df.drop(columns=["datetime","ticker"], errors='ignore').iloc[-1:].replace([np.inf,-np.inf], np.nan).fillna(0.0)
     seq_df = feat_df.drop(columns=["datetime","ticker"], errors='ignore').replace([np.inf,-np.inf], np.nan).fillna(0.0)
 
-    # predict per-model
     results = []
     for name, mod in loaded.items():
         try:
@@ -883,7 +721,6 @@ if run_button:
                     except Exception:
                         raw_pred = None
                 lab, conf, rawinfo = label_from_model(mod, X_in)
-
                 lab_str = str(lab).strip()
                 lab_canon = lab_str.lower()
                 if lab_canon not in ("up","down","neutral"):
@@ -895,7 +732,6 @@ if run_button:
                     except Exception:
                         pass
                 lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
-
                 results.append({
                     "model": name,
                     "label": lab_display,
@@ -903,7 +739,6 @@ if run_button:
                     "suggestion": map_label_to_suggestion(lab_canon),
                     "raw": rawinfo
                 })
-
             else:
                 expected = get_feature_names(mod)
                 n_feat = get_n_features(mod)
@@ -924,7 +759,6 @@ if run_button:
                         X_scaled_df = X_use.copy()
                     try:
                         lab, conf, rawinfo = label_from_model(mod, X_scaled_df)
-
                         lab_str = str(lab).strip()
                         lab_canon = lab_str.lower()
                         if lab_canon not in ("up","down","neutral"):
@@ -936,7 +770,6 @@ if run_button:
                             except Exception:
                                 pass
                         lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
-
                         results.append({
                             "model": name,
                             "label": lab_display,
@@ -944,7 +777,6 @@ if run_button:
                             "suggestion": map_label_to_suggestion(lab_canon),
                             "raw": rawinfo
                         })
-
                     except Exception as e:
                         msg = str(e)
                         provided = set(last_row.columns)
@@ -975,7 +807,6 @@ if run_button:
                         X_scaled_arr = X_arr
                     try:
                         lab, conf, rawinfo = label_from_model(mod, X_scaled_arr)
-
                         lab_str = str(lab).strip()
                         lab_canon = lab_str.lower()
                         if lab_canon not in ("up","down","neutral"):
@@ -987,7 +818,6 @@ if run_button:
                             except Exception:
                                 pass
                         lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
-
                         results.append({
                             "model": name,
                             "label": lab_display,
@@ -995,7 +825,6 @@ if run_button:
                             "suggestion": map_label_to_suggestion(lab_canon),
                             "raw": rawinfo
                         })
-
                     except Exception as e:
                         st.error(f"{name} prediction failed: {e}")
                         results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
@@ -1008,7 +837,6 @@ if run_button:
             st.error(f"Unhandled error predicting with {name}: {e}")
             results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
 
-    # Display Predictions tab
     with tab2:
         st.subheader("Predictions — next interval (real-time)")
         st.write(f"Ticker: **{ticker}**   •   Fetched latest (Manila): **{fetched_last_ts_manila}**")
@@ -1016,7 +844,6 @@ if run_button:
         st.write(f"Real next-interval target (clock-based): **{real_next_time}**")
         if data_is_stale:
             st.caption("Note: fetched market data is stale relative to the real-time clock and may lag real-time.")
-
         if results:
             out = pd.DataFrame(results)[["model", "label", "confidence", "suggestion", "raw"]]
             try:
@@ -1025,8 +852,6 @@ if run_button:
                 st.dataframe(out)
         else:
             st.warning("No predictions produced.")
-
-        # Conclusive meta (preferred) with ensemble fallback
         con_label = None; con_conf = 0.0; con_src = "ensemble"
         if "meta" in loaded:
             try:
@@ -1071,7 +896,6 @@ if run_button:
             except Exception as e:
                 st.warning(f"Meta failed to produce conclusive output: {e}. Falling back to ensemble.")
                 con_label = None
-
         if con_label is None:
             valid_rows = [r for r in results if r.get("label") not in ("ERROR", "Unknown", "unknown")]
             if valid_rows:
@@ -1097,8 +921,6 @@ if run_button:
                 con_label = "No reliable consensus"
                 con_conf = 0.0
                 con_src = "none"
-
-        # show conclusive box
         if con_label:
             iv = interval if isinstance(interval, str) else str(interval)
             if iv == "60m":
@@ -1107,7 +929,6 @@ if run_button:
                 period_word = "day"
             else:
                 period_word = iv
-
             if con_label.lower() == "up":
                 verb = "go up"
                 bg = COLOR_BUY_BG
@@ -1117,7 +938,6 @@ if run_button:
             else:
                 verb = "be neutral"
                 bg = COLOR_HOLD_BG
-
             sentence = f"{ticker} will likely {verb} the next {period_word}."
             html = f"""
             <div style="padding:14px;border-radius:8px;background:{bg};color:{COLOR_TEXT}">
@@ -1128,25 +948,20 @@ if run_button:
             </div>
             """
             st.markdown(html, unsafe_allow_html=True)
-
-        # before download: append this prediction to history and show history for ticker
         try:
             history = load_history()
         except Exception:
             history = pd.DataFrame()
-
         try:
             pred_price = None
             thr_used = None
             if ticker in aligned_close.columns:
                 try:
-                    # Use the robust price_at_or_before helper
                     pred_price = price_at_or_before(aligned_close[ticker], fetched_last_ts_manila)
                 except Exception as e:
                     warn(f"Could not get pred_price for new history row: {e}")
                     pred_price = None
                 try:
-                    # compute volatility-adaptive threshold at prediction time and store it
                     series_for_thr = aligned_close[ticker].dropna()
                     if not series_for_thr.empty:
                         rolling_vol_now = series_for_thr.pct_change().rolling(window=24, min_periods=1).std()
@@ -1162,21 +977,15 @@ if run_button:
         except Exception:
             pred_price = None
             thr_used = 0.002
-
-        # compute target_time relative to the fetched_last_ts to ensure alignment
         try:
             delta = interval_to_timedelta(interval)
             target_time_from_fetch = ensure_timestamp_in_manila(fetched_last_ts_manila) + delta
         except Exception:
-            # fallback to clock-based next interval
             target_time_from_fetch = real_next_time
-
-        # canonical predicted label if possible
         try:
             pred_label_canon = canonical_label(con_label)
         except Exception:
             pred_label_canon = canonical_label(str(con_label)) if con_label is not None else None
-
         new_row = {
             'predicted_at': pd.Timestamp.now(tz_manila),
             'ticker': ticker,
@@ -1196,7 +1005,6 @@ if run_button:
             'checked_at': None,
             'eval_error': None
         }
-
         try:
             if history is None or history.empty:
                 history = pd.DataFrame([new_row])
@@ -1208,7 +1016,6 @@ if run_button:
             save_history(history)
         except Exception as e:
             warn(f"Failed to append/save history: {e}")
-
         try:
             history = load_history()
             if not history.empty:
@@ -1220,10 +1027,11 @@ if run_button:
                     st.dataframe(hist_t[available].head(50))
         except Exception:
             pass
-
         if results:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
+    # ... rest of code continues unchanged ...
+# (History Predictions tab and other tabs remain as in previous version, with evaluation logic now fixed)
     # ------------------------------
     # Detailed Analysis tab
     # ------------------------------
