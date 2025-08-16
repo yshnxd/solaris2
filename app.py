@@ -355,9 +355,189 @@ def price_at_or_before(series: pd.Series, when_ts: pd.Timestamp):
         return float(first_valid.iloc[0]) if not first_valid.empty else float("nan")
     return float("nan")
 
+
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
+    \"\"\"Evaluate unevaluated rows in history_df using aligned_close_df price data.
+    This function evaluates only rows whose target_time <= now (Manila) and that aren't
+    too recent (safety buffer) to avoid immediate evaluation of predictions made milliseconds ago.
+    It prefers 'pred_price' if stored, else looks up price at 'predicted_at', then falls back to
+    fetched_last_ts or the price just before target_time.
+    Neutral threshold (volatility) window is derived from the prediction interval to scale properly.
+    \"\"\"
     if history_df is None or history_df.empty:
         return history_df
+
+    # Ensure evaluated column exists
+    if 'evaluated' not in history_df.columns:
+        history_df['evaluated'] = False
+
+    # normalize timestamp columns
+    for c in ['predicted_at','fetched_last_ts','target_time','checked_at']:
+        if c in history_df.columns:
+            history_df[c] = pd.to_datetime(history_df[c], errors='coerce')
+
+    # prepare aligned close series (ac) and ensure Manila tz on index
+    ac = aligned_close_df.copy()
+    try:
+        ac.index = pd.to_datetime(ac.index)
+    except Exception:
+        pass
+    try:
+        if getattr(ac.index, 'tz', None) is None:
+            ac.index = ac.index.tz_localize('UTC', ambiguous='infer').tz_convert(ZoneInfo('Asia/Manila'))
+        else:
+            ac.index = ac.index.tz_convert(ZoneInfo('Asia/Manila'))
+    except Exception:
+        # if tz conversion fails, continue with naive timestamps
+        pass
+    ac = ac.sort_index()
+    ac.columns = [str(c).upper() for c in ac.columns]
+
+    # determine 'now' used for evaluation
+    try:
+        now_ts = ensure_timestamp_in_manila(current_fetched_ts)
+    except Exception:
+        now_ts = ensure_timestamp_in_manila(pd.Timestamp.now())
+
+    # helper normalized columns for comparisons
+    history_df['_target_norm'] = history_df['target_time'].apply(lambda x: (ensure_timestamp_in_manila(x) if pd.notna(x) else pd.NaT))
+    history_df['_predicted_at_norm'] = history_df['predicted_at'].apply(lambda x: (ensure_timestamp_in_manila(x) if pd.notna(x) else pd.NaT))
+
+    # derive interval timedelta for safety buffer and volatility window
+    default_iv_td = pd.Timedelta(hours=1)
+    iv_td = default_iv_td
+    if 'interval' in history_df.columns and not history_df['interval'].isna().all():
+        try:
+            sample_iv = history_df['interval'].dropna().iloc[0]
+            iv_td = interval_to_timedelta(sample_iv)
+        except Exception:
+            iv_td = default_iv_td
+
+    # safety buffer: don't evaluate rows whose predicted_at is within the last X% of the interval
+    safety_buffer = pd.Timedelta(seconds=max(1, int(iv_td.total_seconds() * 0.05)))
+
+    # mask: unevaluated, has target, and target_time <= now
+    mask_ready = (~history_df['evaluated'].astype(bool)) & history_df['_target_norm'].notna() & (history_df['_target_norm'] <= now_ts)
+
+    # exclude rows where predicted_at is too recent (to avoid immediate eval)
+    recent_pred_mask = history_df['_predicted_at_norm'].notna() & (history_df['_predicted_at_norm'] > (now_ts - safety_buffer))
+    mask_ready = mask_ready & (~recent_pred_mask)
+
+    for idx in history_df[mask_ready].index:
+        try:
+            row = history_df.loc[idx]
+            t_target = history_df.at[idx, '_target_norm']
+            tk_raw = row.get('ticker', '')
+            tk = str(tk_raw).upper().strip() if pd.notna(tk_raw) else ''
+            history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo('Asia/Manila'))
+
+            if not tk:
+                history_df.at[idx, 'eval_error'] = 'missing_ticker'
+                continue
+            if tk not in ac.columns:
+                history_df.at[idx, 'eval_error'] = f'ticker_not_in_price_matrix:{tk}'
+                continue
+
+            series = ac[tk].dropna()
+            if series.empty:
+                history_df.at[idx, 'eval_error'] = 'no_price_data_for_ticker'
+                continue
+
+            raw_label = row.get('predicted_label', None)
+            pred_label = canonical_label(raw_label)
+            if pred_label is None:
+                history_df.at[idx, 'eval_error'] = f'ambiguous_predicted_label:{raw_label}'
+                continue
+
+            # determine prediction price (preference order: stored pred_price, price at predicted_at, fetched_last_ts, just before target)
+            pred_price_val = None
+            if pd.notna(row.get('pred_price')):
+                try:
+                    pred_price_val = float(row.get('pred_price'))
+                except Exception:
+                    pred_price_val = None
+
+            if pred_price_val is None:
+                pred_time_candidate = None
+                if pd.notna(history_df.at[idx, '_predicted_at_norm']):
+                    pred_time_candidate = history_df.at[idx, '_predicted_at_norm']
+                elif pd.notna(row.get('fetched_last_ts')):
+                    pred_time_candidate = ensure_timestamp_in_manila(row.get('fetched_last_ts'))
+                else:
+                    pred_time_candidate = t_target - pd.Timedelta(seconds=1)
+                pred_price_val = price_at_or_before(series, pred_time_candidate)
+
+            actual_price_val = price_at_or_before(series, t_target)
+
+            history_df.at[idx, 'pred_price'] = (None if pd.isna(pred_price_val) else float(pred_price_val))
+            history_df.at[idx, 'actual_price'] = (None if pd.isna(actual_price_val) else float(actual_price_val))
+
+            if pd.isna(pred_price_val) or pd.isna(actual_price_val):
+                history_df.at[idx, 'eval_error'] = 'missing_pred_or_actual_price_for_eval'
+                history_df.at[idx, 'pct_change'] = None
+                history_df.at[idx, 'correct'] = None
+                continue
+
+            if pred_price_val == 0:
+                history_df.at[idx, 'eval_error'] = 'pred_price_zero'
+                history_df.at[idx, 'pct_change'] = None
+                history_df.at[idx, 'correct'] = None
+                continue
+
+            pct = (float(actual_price_val) - float(pred_price_val)) / float(pred_price_val)
+            history_df.at[idx, 'pct_change'] = pct
+
+            # compute rolling vol window based on interval (aim for ~24 hours worth of bars)
+            try:
+                iv_seconds = iv_td.total_seconds()
+                bars_in_24h = max(1, int(24 * 3600 / max(1, iv_seconds)))
+            except Exception:
+                bars_in_24h = 24
+
+            rolling_vol = series.pct_change().rolling(window=bars_in_24h, min_periods=1).std()
+            # volatility at prediction time — prefer fetched_last_ts if available
+            vol_ref_time = None
+            if pd.notna(row.get('fetched_last_ts')):
+                vol_ref_time = ensure_timestamp_in_manila(row.get('fetched_last_ts'))
+            elif pd.notna(history_df.at[idx, '_predicted_at_norm']):
+                vol_ref_time = history_df.at[idx, '_predicted_at_norm']
+            else:
+                vol_ref_time = t_target - pd.Timedelta(seconds=1)
+
+            vol_at_prediction = rolling_vol.asof(vol_ref_time)
+
+            if pd.isna(vol_at_prediction) or vol_at_prediction == 0:
+                thr = 0.002
+            else:
+                thr = float(vol_at_prediction) * 0.5
+
+            history_df.at[idx, 'neutral_threshold_used'] = float(thr)
+            if pct > thr:
+                actual_movement_category = 'up'
+            elif pct < -thr:
+                actual_movement_category = 'down'
+            else:
+                actual_movement_category = 'neutral'
+
+            history_df.at[idx, 'correct'] = (pred_label == actual_movement_category)
+            history_df.at[idx, 'evaluated'] = True
+            history_df.at[idx, 'eval_error'] = None
+
+        except Exception as e:
+            try:
+                history_df.at[idx, 'eval_error'] = f'exception_during_eval:{str(e)}'
+                history_df.at[idx, 'checked_at'] = pd.Timestamp.now(tz=ZoneInfo('Asia/Manila'))
+            except Exception:
+                pass
+            continue
+
+    # cleanup helper cols
+    if '_target_norm' in history_df.columns:
+        history_df = history_df.drop(columns=['_target_norm'])
+    if '_predicted_at_norm' in history_df.columns:
+        history_df = history_df.drop(columns=['_predicted_at_norm'])
+
+    return history_df
     if 'evaluated' not in history_df.columns:
         history_df['evaluated'] = False
     for c in ['predicted_at','fetched_last_ts','target_time','checked_at']:
@@ -978,10 +1158,17 @@ if run_button:
             pred_price = None
             thr_used = 0.002
         try:
-            delta = interval_to_timedelta(interval)
-            target_time_from_fetch = ensure_timestamp_in_manila(fetched_last_ts_manila) + delta
-        except Exception:
-            target_time_from_fetch = real_next_time
+    delta = interval_to_timedelta(interval)
+    # Use the clock-based next interval (safer), but ensure it's strictly in the future
+    real_next = compute_real_next_time_now(interval)
+    now_manila = ensure_timestamp_in_manila(pd.Timestamp.now())
+    target_time_from_fetch = real_next
+    # If real_next is already <= now (rare), then push forward by deltas until it's in the future
+    while target_time_from_fetch <= now_manila:
+        target_time_from_fetch = target_time_from_fetch + delta
+except Exception:
+    target_time_from_fetch = compute_real_next_time_now(interval)
+
         try:
             pred_label_canon = canonical_label(con_label)
         except Exception:
