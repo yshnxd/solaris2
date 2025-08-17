@@ -1038,8 +1038,156 @@ if run_button:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
 with tab3:
-    st.subheader("Detailed Analysis — Defense-Friendly")
-    # ... unchanged: no summary accuracy or history tables here ...
+        st.subheader("Detailed Analysis — Defense-Friendly")
+
+        if not results:
+            st.info("Run a prediction to see detailed analysis and model outputs.")
+        else:
+            # --- 1) Confidence & Probability Breakdown ---
+            st.markdown("### 1) Confidence & Probability Breakdown")
+            try:
+                class_keys = ['up','neutral','down']
+                agg = {k:0.0 for k in class_keys}
+                count = 0
+                for r in results:
+                    raw = r.get('raw')
+                    if isinstance(raw, (list, tuple, np.ndarray)) and len(raw) == len(label_map):
+                        for i,p in enumerate(raw):
+                            lbl = label_map[i].lower()
+                            if lbl in agg:
+                                agg[lbl] += float(p)
+                        count += 1
+                    else:
+                        lbl = r.get('label','').lower()
+                        try:
+                            agg[lbl] += float(r.get('confidence',0.0))
+                        except Exception:
+                            pass
+                        count += 1
+                if count > 0:
+                    probs = {k: (agg[k] / count) for k in class_keys}
+                else:
+                    probs = {k:0.0 for k in class_keys}
+
+                pct_display = {k: f"{probs[k]*100:.1f}%" for k in class_keys}
+                st.write(f"Uptrend: {pct_display['up']} — Neutral: {pct_display['neutral']} — Downtrend: {pct_display['down']}")
+
+                try:
+                    fig_prob = go.Figure(go.Bar(
+                        x=[probs['up']*100, probs['neutral']*100, probs['down']*100],
+                        y=['Up','Neutral','Down'],
+                        orientation='h'
+                    ))
+                    fig_prob.update_layout(height=250, xaxis_title='Probability (%)')
+                    st.plotly_chart(fig_prob, use_container_width=True)
+                except Exception:
+                    pass
+
+                try:
+                    # For the gauge, we can't use a dynamic threshold directly,
+                    # but we can still show the overall confidence.
+                    val = float(con_conf) * 100 if con_conf is not None else 0.0
+                    fig_gauge = go.Figure(go.Indicator(mode='gauge+number', value=val,
+                                                      gauge={'axis':{'range':[0,100]}}))
+                    fig_gauge.update_layout(height=250, margin={'t':20,'b':20,'l':20,'r':20})
+                    st.plotly_chart(fig_gauge, use_container_width=True)
+                except Exception:
+                    pass
+            except Exception as e:
+                st.warning(f"Confidence breakdown failed: {e}")
+
+            # --- 2) Model Ensemble Outputs ---
+            st.markdown("### 2) Model Ensemble Outputs")
+            try:
+                df_models = pd.DataFrame([{'Model':r['model'].upper(), 'Prediction': r['label'].upper(), 'Confidence': f"{r['confidence']*100:.1f}%"} for r in results])
+                st.table(df_models)
+            except Exception:
+                st.write(results)
+
+            # --- 3) Key Technical Indicators Used ---
+            st.markdown("### 3) Key Technical Indicators (latest values)")
+            try:
+                last_idx = chart_df.index[-1] if 'chart_df' in locals() and not chart_df.empty else None
+                indicators = {}
+                try:
+                    indicators['Close'] = float(chart_df['Close'].iloc[-1]) if last_idx is not None else None
+                except Exception:
+                    indicators['Close'] = None
+                try:
+                    indicators['RSI(14)'] = float(ta.momentum.RSIIndicator(chart_df['Close'], window=14).rsi().iloc[-1]) if last_idx is not None else None
+                except Exception:
+                    indicators['RSI(14)'] = None
+                try:
+                    macd = ta.trend.MACD(chart_df['Close']) if last_idx is not None else None
+                    if macd is not None:
+                        indicators['MACD'] = float(macd.macd().iloc[-1])
+                        indicators['MACD_signal'] = float(macd.macd_signal().iloc[-1])
+                except Exception:
+                    indicators['MACD'] = indicators.get('MACD', None)
+                for k,v in indicators.items():
+                    st.write(f"**{k}:** {v}")
+            except Exception:
+                st.write("Indicator summary not available.")
+
+            # --- 4) Feature importance (if available) ---
+            st.markdown("### 4) Feature importance / coefficients (meta or models)")
+            try:
+                shown = False
+                if 'meta' in loaded:
+                    mod = loaded['meta']
+                    if hasattr(mod, 'feature_importances_'):
+                        fi = getattr(mod, 'feature_importances_')
+                        fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(fi))]
+                        df_fi = pd.DataFrame({'feature':fnames, 'importance':fi}).sort_values('importance', ascending=False)
+                        st.dataframe(df_fi.head(50))
+                        shown = True
+                    elif hasattr(mod, 'coef_'):
+                        coefs = np.ravel(getattr(mod, 'coef_'))
+                        fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(coefs))]
+                        df_coef = pd.DataFrame({'feature':fnames, 'coef':coefs}).sort_values('coef', ascending=False)
+                        st.dataframe(df_coef.head(50))
+                        shown = True
+                if not shown:
+                    for name, mod in loaded.items():
+                        if hasattr(mod, 'feature_importances_'):
+                            fi = getattr(mod, 'feature_importances_')
+                            fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(fi))]
+                            df_fi = pd.DataFrame({'feature':fnames, 'importance':fi}).sort_values('importance', ascending=False)
+                            st.markdown(f"**{name} feature importances**")
+                            st.dataframe(df_fi.head(50))
+            except Exception:
+                st.write("No feature importance available.")
+
+            # --- 5) Model agreement visualization ---
+            st.markdown("### 5) Model agreement")
+            votes = {}
+            for r in results:
+                lbl = r.get('label','').lower()
+                votes[lbl] = votes.get(lbl, 0) + 1
+            vote_df = pd.DataFrame(list(votes.items()), columns=['label','count'])
+            if not vote_df.empty:
+                try:
+                    st.bar_chart(vote_df.set_index('label'))
+                except Exception:
+                    st.dataframe(vote_df)
+
+            # --- 6) History accuracy summary ---
+            st.markdown("### 6) Recent prediction accuracy")
+            try:
+                history = load_history()
+                if not history.empty:
+                    evald = history[history['correct'].notna()]
+                    if not evald.empty:
+                        acc = evald['correct'].mean()
+                        st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
+                        per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
+                        st.dataframe(per)
+                    else:
+                        st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
+                else:
+                    st.write("No history yet.")
+            except Exception:
+                st.write("Could not compute history accuracy.")
 
 with tab4:
     st.subheader("History: Prediction Evaluation & Accuracy")
