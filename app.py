@@ -1257,13 +1257,12 @@ if run_button:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
     with tab3:
-    st.subheader("Detailed Analysis — Defense-Friendly")
+        st.subheader("Detailed Analysis — Defense-Friendly")
     results = st.session_state.get('results', None)
     con_conf = st.session_state.get('con_conf', None)
     chart_df = st.session_state.get('chart_df', None)
     label_map = st.session_state.get('label_map', ["down", "neutral", "up"])
     loaded = st.session_state.get('loaded', {})
-
     if not results:
         st.info("Run a prediction to see detailed analysis and model outputs.")
     else:
@@ -1293,34 +1292,8 @@ if run_button:
                 probs = {k: (agg[k] / count) for k in class_keys}
             else:
                 probs = {k:0.0 for k in class_keys}
-
             pct_display = {k: f"{probs[k]*100:.1f}%" for k in class_keys}
             st.write(f"Uptrend: {pct_display['up']} — Neutral: {pct_display['neutral']} — Downtrend: {pct_display['down']}")
-
-            try:
-                import plotly.graph_objects as go
-                fig_prob = go.Figure(go.Bar(
-                    x=[probs['up']*100, probs['neutral']*100, probs['down']*100],
-                    y=['Up','Neutral','Down'],
-                    orientation='h'
-                ))
-                fig_prob.update_layout(height=250, xaxis_title='Probability (%)')
-                st.plotly_chart(fig_prob, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not create probability chart: {e}")
-
-        except Exception as e:
-            st.error(f"Error in confidence breakdown: {e}")
-
-        # --- 2) Model Ensemble Outputs ---
-        st.markdown("### 2) Model Ensemble Outputs")
-        try:
-            import pandas as pd
-            df_models = pd.DataFrame([{'Model':r['model'].upper(), 'Prediction': r['label'].upper(), 'Confidence': f"{r['confidence']*100:.1f}%"} for r in results])
-            st.table(df_models)
-        except Exception as e:
-            st.error(f"Could not display model outputs: {e}")
-            st.write(results)
 
         # --- 2) Model Ensemble Outputs ---
         st.markdown("### 2) Model Ensemble Outputs")
