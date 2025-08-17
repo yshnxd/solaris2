@@ -1311,14 +1311,22 @@ with tab3:
 
             try:
                 val = float(con_conf) * 100 if con_conf is not None else 0.0
-                fig_gauge = go.Figure(go.Indicator(mode='gauge+number', value=val,
-                                                  gauge={'axis':{'range':[0,100]}}))
-                fig_gauge.update_layout(height=250, margin={'t':20,'b':20,'l':20,'r':20})
-                st.plotly_chart(fig_gauge, use_container_width=True)
-            except Exception:
-                pass
-        except Exception as e:
-            st.warning(f"Confidence breakdown failed: {e}")
+                if val > 0:
+                    fig_gauge = go.Figure(go.Indicator(
+                        mode='gauge+number',
+                        value=val,
+                        title={'text': 'Confidence (%)'},
+                        gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#00E5FF"}},
+                        domain={'x': [0, 1], 'y': [0, 1]}
+                    ))
+                   
+                    fig_gauge.update_layout(height=250, margin={'t':20,'b':20,'l':20,'r':20})
+                    st.plotly_chart(fig_gauge, use_container_width=True)
+                else:
+                    st.info("No valid confidence to display.")
+
+            except Exception as e:
+                st.warning(f"Confidence breakdown failed: {e}")
 
         # --- 2) Model Ensemble Outputs ---
         st.markdown("### 2) Model Ensemble Outputs")
