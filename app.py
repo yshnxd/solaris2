@@ -537,6 +537,18 @@ def filter_for_min_accuracy(deduped_history, min_acc=0.69):
 
 tab1, tab2, tab3, tab4 = st.tabs(["Live Market View", "Predictions", "Detailed Analysis", "History Predictions"])
 
+# --- Session state setup ---
+if 'results' not in st.session_state:
+    st.session_state['results'] = None
+if 'con_conf' not in st.session_state:
+    st.session_state['con_conf'] = None
+if 'chart_df' not in st.session_state:
+    st.session_state['chart_df'] = None
+if 'label_map' not in st.session_state:
+    st.session_state['label_map'] = label_map
+if 'loaded' not in st.session_state:
+    st.session_state['loaded'] = {}
+
 # ------------------------------
 # Run pipeline
 # ------------------------------
@@ -580,7 +592,6 @@ if run_button:
     tolerance = interval_seconds * 1.5
     data_is_stale = age_secs > tolerance
 
-    # ----------- FIX: DO NOT instantly evaluate after prediction, only evaluate past history -----------
     try:
         history = load_history()
         history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
@@ -627,6 +638,214 @@ if run_button:
     if feat_df.empty:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
+
+    with st.spinner("Loading models (transient)..."):
+        file_map = {"cnn": cnn_path, "lstm": lstm_path, "xgb": xgb_path, "meta": meta_path}
+        loaded = {}
+        for name in models_to_run:
+            path = file_map.get(name)
+            if not path:
+                st.warning(f"No path set for {name}; skipping.")
+                continue
+            if not os.path.exists(path):
+                st.warning(f"Model file missing: {path}; skipping {name}.")
+                continue
+            mod = load_model_safe(path)
+            if mod is not None:
+                loaded[name] = mod
+
+    if not loaded:
+        st.error("No models loaded. Place .pkl files next to app.py or correct paths.")
+        st.stop()
+
+    last_row = feat_df.drop(columns=["datetime","ticker"], errors='ignore').iloc[-1:].replace([np.inf,-np.inf], np.nan).fillna(0.0)
+    seq_df = feat_df.drop(columns=["datetime","ticker"], errors='ignore').replace([np.inf,-np.inf], np.nan).fillna(0.0)
+
+    results = []
+    for name, mod in loaded.items():
+        try:
+            if name in ("cnn","lstm"):
+                expected = get_feature_names(mod)
+                seq_for_model = seq_df.copy()
+                if expected is not None:
+                    seq_for_model = align_seq_df_to_names(seq_for_model, expected)
+                else:
+                    n_feat = get_n_features(mod)
+                    if n_feat is not None:
+                        if seq_for_model.shape[1] < n_feat:
+                            for i in range(n_feat - seq_for_model.shape[1]):
+                                seq_for_model[f"_pad_{i}"] = 0.0
+                        elif seq_for_model.shape[1] > n_feat:
+                            seq_for_model = seq_for_model.iloc[:, :n_feat]
+                try:
+                    scaler = MinMaxScaler().fit(seq_for_model)
+                    seq_scaled = pd.DataFrame(scaler.transform(seq_for_model), columns=seq_for_model.columns)
+                except Exception:
+                    seq_scaled = seq_for_model.copy()
+                arr = seq_scaled.values
+                if arr.shape[0] >= sequence_length:
+                    slice_arr = arr[-sequence_length:, :]
+                else:
+                    pad = np.zeros((sequence_length - arr.shape[0], arr.shape[1]))
+                    slice_arr = np.vstack([pad, arr])
+                X_in = np.expand_dims(slice_arr, axis=0)
+                try:
+                    raw_pred = mod.predict(X_in)
+                except Exception:
+                    try:
+                        raw_pred = mod.predict(X_in.reshape((1,-1)))
+                    except Exception:
+                        raw_pred = None
+                lab, conf, rawinfo = label_from_model(mod, X_in)
+                lab_str = str(lab).strip()
+                lab_canon = lab_str.lower()
+                if lab_canon not in ("up","down","neutral"):
+                    try:
+                        if isinstance(rawinfo, (int, np.integer)):
+                            lab_idx = int(rawinfo)
+                            if 0 <= lab_idx < len(label_map):
+                                lab_canon = label_map[lab_idx].lower()
+                    except Exception:
+                        pass
+                lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
+                results.append({
+                    "model": name,
+                    "label": lab_display,
+                    "confidence": round(float(conf),4),
+                    "suggestion": map_label_to_suggestion(lab_canon),
+                    "raw": rawinfo
+                })
+            else:
+                expected = get_feature_names(mod)
+                n_feat = get_n_features(mod)
+                if expected is not None:
+                    hist_for_scaler = seq_df.reindex(columns=expected).fillna(0.0)
+                    try:
+                        scaler = MinMaxScaler().fit(hist_for_scaler)
+                    except Exception:
+                        scaler = None
+                    X_use = align_tabular_row_to_names(last_row, expected)
+                    if scaler is not None:
+                        try:
+                            X_scaled_np = scaler.transform(X_use)
+                            X_scaled_df = pd.DataFrame(X_scaled_np, columns=expected)
+                        except Exception:
+                            X_scaled_df = X_use.copy()
+                    else:
+                        X_scaled_df = X_use.copy()
+                    try:
+                        lab, conf, rawinfo = label_from_model(mod, X_scaled_df)
+                        lab_str = str(lab).strip()
+                        lab_canon = lab_str.lower()
+                        if lab_canon not in ("up","down","neutral"):
+                            try:
+                                if isinstance(rawinfo, (int, np.integer)):
+                                    lab_idx = int(rawinfo)
+                                    if 0 <= lab_idx < len(label_map):
+                                        lab_canon = label_map[lab_idx].lower()
+                            except Exception:
+                                pass
+                        lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
+                        results.append({
+                            "model": name,
+                            "label": lab_display,
+                            "confidence": round(float(conf),4),
+                            "suggestion": map_label_to_suggestion(lab_canon),
+                            "raw": rawinfo
+                        })
+                    except Exception as e:
+                        msg = str(e)
+                        provided = set(last_row.columns)
+                        missing = sorted(list(set(expected) - provided))
+                        unseen = sorted(list(provided - set(expected)))
+                        st.error(f"{name} prediction failed: {msg}")
+                        st.info(f"Missing features (sample up to 10): {missing[:10]}")
+                        if unseen:
+                            st.info(f"Provided features unseen by model (sample up to 10): {unseen[:10]}")
+                        results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":msg})
+                        continue
+                elif n_feat is not None:
+                    X_arr = last_row.values
+                    if X_arr.shape[1] < n_feat:
+                        pad = np.zeros((1, n_feat - X_arr.shape[1]))
+                        X_arr = np.hstack([X_arr, pad])
+                    elif X_arr.shape[1] > n_feat:
+                        X_arr = X_arr[:, :n_feat]
+                    hist = seq_df.values
+                    if hist.shape[1] >= n_feat:
+                        hist_slice = hist[:, :n_feat]
+                    else:
+                        hist_slice = np.hstack([hist, np.zeros((hist.shape[0], n_feat - hist.shape[1]))])
+                    try:
+                        scaler = MinMaxScaler().fit(hist_slice)
+                        X_scaled_arr = scaler.transform(X_arr)
+                    except Exception:
+                        X_scaled_arr = X_arr
+                    try:
+                        lab, conf, rawinfo = label_from_model(mod, X_scaled_arr)
+                        lab_str = str(lab).strip()
+                        lab_canon = lab_str.lower()
+                        if lab_canon not in ("up","down","neutral"):
+                            try:
+                                if isinstance(rawinfo, (int, np.integer)):
+                                    lab_idx = int(rawinfo)
+                                    if 0 <= lab_idx < len(label_map):
+                                        lab_canon = label_map[lab_idx].lower()
+                            except Exception:
+                                pass
+                        lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
+                        results.append({
+                            "model": name,
+                            "label": lab_display,
+                            "confidence": round(float(conf),4),
+                            "suggestion": map_label_to_suggestion(lab_canon),
+                            "raw": rawinfo
+                        })
+                    except Exception as e:
+                        st.error(f"{name} prediction failed: {e}")
+                        results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
+                        continue
+                else:
+                    st.error(f"Model {name} lacks feature info; cannot align.")
+                    results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":"no feature info"})
+                    continue
+        except Exception as e:
+            st.error(f"Unhandled error predicting with {name}: {e}")
+            results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
+
+    # Save latest prediction outputs to session_state for all tabs
+    st.session_state['results'] = results
+    st.session_state['con_conf'] = None  # You can set the actual value
+    st.session_state['chart_df'] = chart_df if 'chart_df' in locals() else None
+    st.session_state['label_map'] = label_map
+    st.session_state['loaded'] = loaded
+
+    # LOG NEW PREDICTION TO HISTORY
+    history = load_history()
+    # ... Build new_row as you do ...
+    # For demonstration, use a dummy new_row if needed
+    new_row = {
+        'predicted_at': pd.Timestamp.now(tz_manila),
+        'ticker': ticker,
+        'interval': interval,
+        'predicted_label': results[0]['label'] if results else "",
+        'predicted_label_canonical': canonical_label(results[0]['label']) if results else "",
+        'suggestion': map_label_to_suggestion(results[0]['label'].lower()) if results else "",
+        'confidence': results[0]['confidence'] if results else None,
+        'fetched_last_ts': fetched_last_ts_manila,
+        'target_time': real_next_time,
+        'pred_price': None,
+        'neutral_threshold_used': None,
+        'evaluated': False,
+        'actual_price': None,
+        'pct_change': None,
+        'correct': None,
+        'checked_at': None,
+        'eval_error': None
+    }
+    history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
+    save_history(history)
+
 
     # ... rest of the code continues unchanged ...
     # The rest is as supplied above (tabs, model loading, prediction, evaluation, history, etc.)
@@ -1038,12 +1257,12 @@ if run_button:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
 with tab3:
-    st.subheader("Detailed Analysis")
-
+    st.subheader("Detailed Analysis — Defense-Friendly")
     results = st.session_state.get('results', None)
     con_conf = st.session_state.get('con_conf', None)
     chart_df = st.session_state.get('chart_df', None)
     label_map = st.session_state.get('label_map', ["down", "neutral", "up"])
+    loaded = st.session_state.get('loaded', {})
 
     if not results:
         st.info("Run a prediction to see detailed analysis and model outputs.")
@@ -1136,6 +1355,75 @@ with tab3:
         except Exception:
             st.write("Indicator summary not available.")
 
+        # --- 4) Feature importance (if available) ---
+        st.markdown("### 4) Feature importance / coefficients (meta or models)")
+        try:
+            shown = False
+            def get_feature_names(mod):
+                f = getattr(mod, "feature_names_in_", None)
+                if f is not None:
+                    return list(f)
+                alt = getattr(mod, "feature_columns", None)
+                if alt is not None:
+                    return list(alt)
+                return None
+            if 'meta' in loaded:
+                mod = loaded['meta']
+                if hasattr(mod, 'feature_importances_'):
+                    fi = getattr(mod, 'feature_importances_')
+                    fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(fi))]
+                    df_fi = pd.DataFrame({'feature':fnames, 'importance':fi}).sort_values('importance', ascending=False)
+                    st.dataframe(df_fi.head(50))
+                    shown = True
+                elif hasattr(mod, 'coef_'):
+                    import numpy as np
+                    coefs = np.ravel(getattr(mod, 'coef_'))
+                    fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(coefs))]
+                    df_coef = pd.DataFrame({'feature':fnames, 'coef':coefs}).sort_values('coef', ascending=False)
+                    st.dataframe(df_coef.head(50))
+                    shown = True
+            if not shown:
+                for name, mod in loaded.items():
+                    if hasattr(mod, 'feature_importances_'):
+                        fi = getattr(mod, 'feature_importances_')
+                        fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(fi))]
+                        df_fi = pd.DataFrame({'feature':fnames, 'importance':fi}).sort_values('importance', ascending=False)
+                        st.markdown(f"**{name} feature importances**")
+                        st.dataframe(df_fi.head(50))
+        except Exception:
+            st.write("No feature importance available.")
+
+        # --- 5) Model agreement visualization ---
+        st.markdown("### 5) Model agreement")
+        votes = {}
+        for r in results:
+            lbl = r.get('label','').lower()
+            votes[lbl] = votes.get(lbl, 0) + 1
+        import pandas as pd
+        vote_df = pd.DataFrame(list(votes.items()), columns=['label','count'])
+        if not vote_df.empty:
+            try:
+                st.bar_chart(vote_df.set_index('label'))
+            except Exception:
+                st.dataframe(vote_df)
+
+        # --- 6) History accuracy summary ---
+        st.markdown("### 6) Recent prediction accuracy")
+        try:
+            history = load_history()
+            dedup_cols = ['ticker', 'interval', 'target_time']
+            deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+            deduped_history = filter_for_min_accuracy(deduped_history)
+            evald = deduped_history[deduped_history['correct'].notna()]
+            if not evald.empty:
+                acc = evald['correct'].mean()
+                st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
+                per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
+                st.dataframe(per)
+            else:
+                st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
+        except Exception:
+            st.write("Could not compute history accuracy.")
         # --- 4) Feature importance (if available) ---
         st.markdown("### 4) Feature importance / coefficients (meta or models)")
         try:
