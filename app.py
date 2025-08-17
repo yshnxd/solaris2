@@ -388,8 +388,7 @@ def append_prediction_with_dedup(history, new_row, history_file=None, save_histo
         mask_same = (hist_ticker == new_key[0]) & (hist_interval == new_key[1]) & (hist_target_norm == new_key[2])
 
 history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
-
-
+    # try to save if requested
     try:
         if save_history_func is not None:
             save_history_func(out)
