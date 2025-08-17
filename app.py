@@ -1364,10 +1364,15 @@ with tab4:
             else:
                 st.info("Could not fetch price series for the pending tickers — will re-attempt later.")
 
-    # --- Summary Accuracy Stats ---
-    st.markdown("### Summary Accuracy Stats")
-    total_preds = len(history)
-    evaluated_rows = history[history['evaluated'].astype(bool)]
+    # --- Summary Accuracy Stats (using deduped history) ---
+    st.markdown("### Summary Accuracy Stats (Deduped)")
+
+    # Deduplicate history by (ticker, interval, target_time), keep latest prediction
+    dedup_cols = ['ticker', 'interval', 'target_time']
+    deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+
+    total_preds = len(deduped_history)
+    evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
     evaluated_count = len(evaluated_rows)
     correct_count = int(evaluated_rows['correct'].sum()) if evaluated_count > 0 else 0
     accuracy = (correct_count / evaluated_count) if evaluated_count > 0 else 0.0
@@ -1389,7 +1394,6 @@ with tab4:
             st.plotly_chart(fig_donut, use_container_width=True)
         except Exception:
             st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
-
   # Replace the "Recent Predictions Table" section in your History Predictions tab with this block
 
     # --- Recent Predictions Table (deduplicated by ticker+interval+target_time, keep latest by predicted_at) ---
