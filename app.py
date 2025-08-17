@@ -1355,75 +1355,7 @@ with tab3:
         except Exception:
             st.write("Indicator summary not available.")
 
-        # --- 4) Feature importance (if available) ---
-        st.markdown("### 4) Feature importance / coefficients (meta or models)")
-        try:
-            shown = False
-            def get_feature_names(mod):
-                f = getattr(mod, "feature_names_in_", None)
-                if f is not None:
-                    return list(f)
-                alt = getattr(mod, "feature_columns", None)
-                if alt is not None:
-                    return list(alt)
-                return None
-            if 'meta' in loaded:
-                mod = loaded['meta']
-                if hasattr(mod, 'feature_importances_'):
-                    fi = getattr(mod, 'feature_importances_')
-                    fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(fi))]
-                    df_fi = pd.DataFrame({'feature':fnames, 'importance':fi}).sort_values('importance', ascending=False)
-                    st.dataframe(df_fi.head(50))
-                    shown = True
-                elif hasattr(mod, 'coef_'):
-                    import numpy as np
-                    coefs = np.ravel(getattr(mod, 'coef_'))
-                    fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(coefs))]
-                    df_coef = pd.DataFrame({'feature':fnames, 'coef':coefs}).sort_values('coef', ascending=False)
-                    st.dataframe(df_coef.head(50))
-                    shown = True
-            if not shown:
-                for name, mod in loaded.items():
-                    if hasattr(mod, 'feature_importances_'):
-                        fi = getattr(mod, 'feature_importances_')
-                        fnames = get_feature_names(mod) or [f"f{i}" for i in range(len(fi))]
-                        df_fi = pd.DataFrame({'feature':fnames, 'importance':fi}).sort_values('importance', ascending=False)
-                        st.markdown(f"**{name} feature importances**")
-                        st.dataframe(df_fi.head(50))
-        except Exception:
-            st.write("No feature importance available.")
-
-        # --- 5) Model agreement visualization ---
-        st.markdown("### 5) Model agreement")
-        votes = {}
-        for r in results:
-            lbl = r.get('label','').lower()
-            votes[lbl] = votes.get(lbl, 0) + 1
-        import pandas as pd
-        vote_df = pd.DataFrame(list(votes.items()), columns=['label','count'])
-        if not vote_df.empty:
-            try:
-                st.bar_chart(vote_df.set_index('label'))
-            except Exception:
-                st.dataframe(vote_df)
-
-        # --- 6) History accuracy summary ---
-        st.markdown("### 6) Recent prediction accuracy")
-        try:
-            history = load_history()
-            dedup_cols = ['ticker', 'interval', 'target_time']
-            deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-            deduped_history = filter_for_min_accuracy(deduped_history)
-            evald = deduped_history[deduped_history['correct'].notna()]
-            if not evald.empty:
-                acc = evald['correct'].mean()
-                st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
-                per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
-                st.dataframe(per)
-            else:
-                st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
-        except Exception:
-            st.write("Could not compute history accuracy.")
+       
         # --- 4) Feature importance (if available) ---
         st.markdown("### 4) Feature importance / coefficients (meta or models)")
         try:
@@ -1478,22 +1410,22 @@ with tab3:
                 st.dataframe(vote_df)
 
        # --- 6) History accuracy summary ---
-st.markdown("### 6) Recent prediction accuracy")
-try:
-    history = load_history()
-    dedup_cols = ['ticker', 'interval', 'target_time']
-    deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-    deduped_history = filter_for_min_accuracy(deduped_history)
-    evald = deduped_history[deduped_history['correct'].notna()]
-    if not evald.empty:
-        acc = evald['correct'].mean()
-        st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
-        per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
-        st.dataframe(per)
-    else:
-        st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
-except Exception:
-    st.write("Could not compute history accuracy.")
+       st.markdown("### 6) Recent prediction accuracy")
+       try:
+           history = load_history()
+           dedup_cols = ['ticker', 'interval', 'target_time']
+           deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+           deduped_history = filter_for_min_accuracy(deduped_history)
+           evald = deduped_history[deduped_history['correct'].notna()]
+           if not evald.empty:
+               acc = evald['correct'].mean()
+               st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
+               per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
+               st.dataframe(per)
+           else:
+               st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
+       except Exception:
+           st.write("Could not compute history accuracy.")
 
 with tab4:
     st.subheader("History: Prediction Evaluation & Accuracy")
