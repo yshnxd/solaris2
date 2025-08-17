@@ -1294,7 +1294,19 @@ if run_button:
                 probs = {k:0.0 for k in class_keys}
             pct_display = {k: f"{probs[k]*100:.1f}%" for k in class_keys}
             st.write(f"Uptrend: {pct_display['up']} — Neutral: {pct_display['neutral']} — Downtrend: {pct_display['down']}")
-
+            try:
+                import plotly.graph_objects as go
+                fig_prob = go.Figure(go.Bar(
+                    x=[probs['up']*100, probs['neutral']*100, probs['down']*100],
+                    y=['Up','Neutral','Down'],
+                    orientation='h'
+                ))
+                fig_prob.update_layout(height=250, xaxis_title='Probability (%)')
+                st.plotly_chart(fig_prob, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Could not create probability chart: {e}")
+        except Exception as e:
+            st.error(f"Error in confidence breakdown: {e}")
         # --- 2) Model Ensemble Outputs ---
         st.markdown("### 2) Model Ensemble Outputs")
         try:
