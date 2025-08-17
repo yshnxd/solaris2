@@ -1064,7 +1064,7 @@ if run_button:
                 missing_cols = set(new_row.keys()) - set(history.columns)
                 for mc in missing_cols:
                     history[mc] = pd.NA
-           history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
+                history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
 
             save_history(history)
         except Exception as e:
