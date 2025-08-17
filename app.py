@@ -1390,10 +1390,18 @@ with tab4:
         except Exception:
             st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
 
-    # --- Recent Predictions Table ---
-    st.markdown("### Recent Predictions Table")
+  # Replace the "Recent Predictions Table" section in your History Predictions tab with this block
+
+    # --- Recent Predictions Table (deduplicated by ticker+interval+target_time, keep latest by predicted_at) ---
+    st.markdown("### Recent Predictions Table (Deduped by Ticker/Interval/Target Time)")
+
+    # Deduplicate: keep only the most recent prediction for each (ticker, interval, target_time)
+    # Sort by predicted_at descending, then drop duplicates (keep first = most recent)
+    dedup_cols = ['ticker', 'interval', 'target_time']
+    deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+
     display_rows = []
-    for _, row in history.sort_values('predicted_at', ascending=False).head(200).iterrows():
+    for _, row in deduped_history.sort_values('predicted_at', ascending=False).head(200).iterrows():
         pred_at = row.get('predicted_at')
         tk = str(row.get('ticker','')).upper()
         pred_lbl = str(row.get('predicted_label','')).upper() if pd.notna(row.get('predicted_label')) else ""
@@ -1413,15 +1421,15 @@ with tab4:
                 actual_move = ""
         else:
             actual_move = ""
-
         if pd.notna(row.get('correct')):
             correct_mark = "✅" if bool(row.get('correct')) else "❌"
         else:
             correct_mark = "⏳"
-
         display_rows.append({
             "Date/Time": pred_at,
             "Ticker": tk,
+            "Interval": row.get('interval'),
+            "Target Time": row.get('target_time'),
             "Predicted Movement": pred_lbl,
             "Actual Movement": actual_move,
             "Correct?": correct_mark,
@@ -1437,10 +1445,10 @@ with tab4:
     else:
         st.write("No rows to show.")
 
-    # Download full history
+    # Download deduped history
     try:
-        csv_bytes = history.to_csv(index=False).encode("utf-8")
-        st.download_button("Download full history CSV", data=csv_bytes, file_name="predictions_history.csv")
+        csv_bytes = deduped_history.to_csv(index=False).encode("utf-8")
+        st.download_button("Download deduped history CSV", data=csv_bytes, file_name="predictions_history_deduped.csv")
     except Exception:
         pass
 # -----------------------------------------------------------------------------
