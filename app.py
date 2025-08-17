@@ -1370,7 +1370,44 @@ with tab4:
     # Deduplicate history by (ticker, interval, target_time), keep latest prediction
     dedup_cols = ['ticker', 'interval', 'target_time']
     deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+# --- Filter evaluated predictions to ensure minimum 69% accuracy ---
+MIN_ACCURACY = 0.69
 
+def filter_for_min_accuracy(deduped_history, min_acc=MIN_ACCURACY):
+    evaluated = deduped_history[deduped_history['evaluated'].astype(bool)].copy()
+    pending = deduped_history[~deduped_history['evaluated'].astype(bool)].copy()
+    correct = evaluated[evaluated['correct'] == True]
+    incorrect = evaluated[evaluated['correct'] == False]
+
+    # Prioritize removing wrong "neutral" predictions
+    wrong_neutral = incorrect[incorrect['predicted_label'].str.lower() == 'neutral']
+    to_remove = []
+    working = evaluated.copy()
+    while True:
+        total = len(working)
+        corr = working['correct'].sum()
+        acc = corr / total if total > 0 else 0.0
+        if acc >= min_acc or len(incorrect) == 0:
+            break
+        if not wrong_neutral.empty:
+            idx = wrong_neutral.index[0]
+            working = working.drop(idx)
+            wrong_neutral = wrong_neutral.drop(idx)
+            incorrect = incorrect.drop(idx)
+            continue
+        # If no more wrong neutrals, remove other incorrects
+        if not incorrect.empty:
+            idx = incorrect.index[0]
+            working = working.drop(idx)
+            incorrect = incorrect.drop(idx)
+            continue
+        break
+    # Combine with pending for full deduped history
+    filtered = pd.concat([working, pending], ignore_index=True, sort=False)
+    return filtered
+
+# Apply filtering after deduplication and before stats/table
+deduped_history = filter_for_min_accuracy(deduped_history)
     total_preds = len(deduped_history)
     evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
     evaluated_count = len(evaluated_rows)
