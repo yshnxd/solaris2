@@ -1407,12 +1407,13 @@ def filter_for_min_accuracy(deduped_history, min_acc=MIN_ACCURACY):
     return filtered
 
 # Apply filtering after deduplication and before stats/table
+# Apply filtering after deduplication and before stats/table
 deduped_history = filter_for_min_accuracy(deduped_history)
-    total_preds = len(deduped_history)
-    evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
-    evaluated_count = len(evaluated_rows)
-    correct_count = int(evaluated_rows['correct'].sum()) if evaluated_count > 0 else 0
-    accuracy = (correct_count / evaluated_count) if evaluated_count > 0 else 0.0
+total_preds = len(deduped_history)
+evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
+evaluated_count = len(evaluated_rows)
+correct_count = int(evaluated_rows['correct'].sum()) if evaluated_count > 0 else 0
+accuracy = (correct_count / evaluated_count) if evaluated_count > 0 else 0.0
 
     cols = st.columns([2, 1])
     with cols[0]:
