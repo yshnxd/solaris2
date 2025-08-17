@@ -1410,22 +1410,22 @@ with tab3:
                 st.dataframe(vote_df)
 
        # --- 6) History accuracy summary ---
-       st.markdown("### 6) Recent prediction accuracy")
-       try:
-           history = load_history()
-           dedup_cols = ['ticker', 'interval', 'target_time']
-           deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-           deduped_history = filter_for_min_accuracy(deduped_history)
-           evald = deduped_history[deduped_history['correct'].notna()]
-           if not evald.empty:
-               acc = evald['correct'].mean()
-               st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
-               per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
-               st.dataframe(per)
-           else:
-               st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
-       except Exception:
-           st.write("Could not compute history accuracy.")
+        st.markdown("### 6) Recent prediction accuracy")
+        try:
+            history = load_history()
+            dedup_cols = ['ticker', 'interval', 'target_time']
+            deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+            deduped_history = filter_for_min_accuracy(deduped_history)
+            evald = deduped_history[deduped_history['correct'].notna()]
+            if not evald.empty:
+                acc = evald['correct'].mean()
+                st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
+                per = evald.groupby('ticker')['correct'].agg(['mean','count']).sort_values('count', ascending=False)
+                st.dataframe(per)
+            else:
+                st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
+        except Exception:
+            st.write("Could not compute history accuracy.")
 
 with tab4:
     st.subheader("History: Prediction Evaluation & Accuracy")
