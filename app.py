@@ -1189,9 +1189,9 @@ with tab3:
             except Exception:
                 st.dataframe(vote_df)
 
-        # --- 6) History accuracy summary ---
-        st.markdown("### 6) Recent prediction accuracy")
-        try:
+       # --- 6) History accuracy summary ---
+st.markdown("### 6) Recent prediction accuracy")
+try:
     history = load_history()
     dedup_cols = ['ticker', 'interval', 'target_time']
     deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
@@ -1206,6 +1206,7 @@ with tab3:
         st.write("No evaluated history rows yet. Predictions will be evaluated when their target time passes.")
 except Exception:
     st.write("Could not compute history accuracy.")
+
 with tab4:
     st.subheader("History: Prediction Evaluation & Accuracy")
 
@@ -1244,7 +1245,8 @@ with tab4:
 
         for (tk, iv), grp in groups:
             tk = str(tk).strip().upper()
-            if not tk: continue
+            if not tk:
+                continue
             yf_interval = iv if isinstance(iv, str) else "60m"
             min_fetched = grp['fetched_last_ts'].min() if 'fetched_last_ts' in grp.columns else pd.NaT
             max_target = grp['target_time'].max() if 'target_time' in grp.columns else pd.NaT
@@ -1315,7 +1317,6 @@ with tab4:
                 st.success("Force evaluation complete and history updated where possible.")
             else:
                 st.info("Could not fetch price series for the pending tickers — will re-attempt later.")
-
     st.markdown("### Summary Accuracy Stats")
 
     dedup_cols = ['ticker', 'interval', 'target_time']
