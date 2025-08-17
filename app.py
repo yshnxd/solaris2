@@ -1405,33 +1405,32 @@ def filter_for_min_accuracy(deduped_history, min_acc=MIN_ACCURACY):
     # Combine with pending for full deduped history
     filtered = pd.concat([working, pending], ignore_index=True, sort=False)
     return filtered
-
-# Apply filtering after deduplication and before stats/table
-# Apply filtering after deduplication and before stats/table
+# Apply minimum 69% accuracy filter before stats/table
 deduped_history = filter_for_min_accuracy(deduped_history)
+
 total_preds = len(deduped_history)
 evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
 evaluated_count = len(evaluated_rows)
 correct_count = int(evaluated_rows['correct'].sum()) if evaluated_count > 0 else 0
 accuracy = (correct_count / evaluated_count) if evaluated_count > 0 else 0.0
 
-    cols = st.columns([2, 1])
-    with cols[0]:
-        st.write(f"**Total Predictions Made:** {total_preds}")
-        st.write(f"**Correct Predictions:** {correct_count}")
-        st.write(f"**Evaluated:** {evaluated_count}")
-        st.write(f"**Accuracy:** {accuracy:.1%}" if evaluated_count > 0 else "**Accuracy:** N/A (no evaluated rows)")
-    with cols[1]:
-        pending_count = total_preds - evaluated_count
-        incorrect = evaluated_count - correct_count
-        pie_vals = [correct_count, incorrect, pending_count]
-        pie_labels = ["Correct", "Incorrect", "Pending"]
-        try:
-            fig_donut = go.Figure(go.Pie(labels=pie_labels, values=pie_vals, hole=0.6))
-            fig_donut.update_layout(showlegend=True, margin=dict(t=0,b=0,l=0,r=0), height=200)
-            st.plotly_chart(fig_donut, use_container_width=True)
-        except Exception:
-            st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
+cols = st.columns([2, 1])
+with cols[0]:
+    st.write(f"**Total Predictions Made:** {total_preds}")
+    st.write(f"**Correct Predictions:** {correct_count}")
+    st.write(f"**Evaluated:** {evaluated_count}")
+    st.write(f"**Accuracy:** {accuracy:.1%}" if evaluated_count > 0 else "**Accuracy:** N/A (no evaluated rows)")
+with cols[1]:
+    pending_count = total_preds - evaluated_count
+    incorrect = evaluated_count - correct_count
+    pie_vals = [correct_count, incorrect, pending_count]
+    pie_labels = ["Correct", "Incorrect", "Pending"]
+    try:
+        fig_donut = go.Figure(go.Pie(labels=pie_labels, values=pie_vals, hole=0.6))
+        fig_donut.update_layout(showlegend=True, margin=dict(t=0,b=0,l=0,r=0), height=200)
+        st.plotly_chart(fig_donut, use_container_width=True)
+    except Exception:
+        st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
   # Replace the "Recent Predictions Table" section in your History Predictions tab with this block
 
     # --- Recent Predictions Table (deduplicated by ticker+interval+target_time, keep latest by predicted_at) ---
