@@ -1,4 +1,4 @@
-# app.py - SOLARIS — Stock Price Movement Predictor (Revised: safer loading, cached downloads, robust history eval, VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD, correct deferred evaluation)
+# app.py - SOLARIS — Stock Price Movement Predictor (REVISED: fixes logging predictions when run, prediction now always logged)
 import os
 import tempfile
 import warnings
@@ -624,6 +624,24 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
+    # --------- FIX: LOG PREDICTION HISTORY HERE ---------
+    history = load_history()  # Reload, not in try/except so it's always a DataFrame
+
+    # Prepare to log the prediction before showing results
+    prediction_row = {
+        "ticker": ticker,
+        "interval": interval,
+        "predicted_at": pd.Timestamp.now(ZoneInfo("Asia/Manila")),
+        "fetched_last_ts": ensure_timestamp_in_manila(fetched_last_ts),
+        "target_time": real_next_time,
+        # The following filled below after making predictions:
+        "predicted_label": None,
+        "suggestion": None,
+        "confidence": None,
+        "pred_price": None
+    }
+
+    # ------------- TABS ---------------------
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
@@ -882,8 +900,8 @@ if run_button:
                                     lab_idx = int(rawinfo)
                                     if 0 <= lab_idx < len(label_map):
                                         lab_canon = label_map[lab_idx].lower()
-                            except Exception:
-                                pass
+                                except Exception:
+                                    pass
                         lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
                         results.append({
                             "model": name,
@@ -904,6 +922,90 @@ if run_button:
             st.error(f"Unhandled error predicting with {name}: {e}")
             results.append({"model":name,"label":"ERROR","confidence":0.0,"suggestion":"ERROR","raw":str(e)})
 
+    # ------------ LOGGING THE MAIN PREDICTION -----------
+    # Consensus logic as before, but also log the actual prediction row
+    con_label = None; con_conf = 0.0; con_src = "ensemble"
+    if "meta" in loaded:
+        try:
+            meta_mod = loaded["meta"]
+            expected = get_feature_names(meta_mod)
+            n_feat = get_n_features(meta_mod)
+            if expected is not None:
+                X_meta = align_tabular_row_to_names(last_row, expected)
+                try:
+                    scaler = MinMaxScaler().fit(seq_df.reindex(columns=expected).fillna(0.0))
+                    X_scaled_meta = pd.DataFrame(scaler.transform(X_meta), columns=expected)
+                    lab, conf, rawinfo = label_from_model(meta_mod, X_scaled_meta)
+                except Exception:
+                    lab, conf, rawinfo = label_from_model(meta_mod, X_meta)
+            elif n_feat is not None:
+                X_arr = last_row.values
+                if X_arr.shape[1] < n_feat:
+                    pad = np.zeros((1, n_feat - X_arr.shape[1]))
+                    X_arr = np.hstack([X_arr, pad])
+                elif X_arr.shape[1] > n_feat:
+                    X_arr = X_arr[:, :n_feat]
+                hist = seq_df.values
+                if hist.shape[1] >= n_feat:
+                    hist_slice = hist[:, :n_feat]
+                else:
+                    hist_slice = np.hstack([hist, np.zeros((hist.shape[0], n_feat - hist.shape[1]))])
+                try:
+                    scaler = MinMaxScaler().fit(hist_slice)
+                    X_scaled = scaler.transform(X_arr)
+                except Exception:
+                    X_scaled = X_arr
+                lab, conf, rawinfo = label_from_model(meta_mod, X_scaled)
+            else:
+                raise RuntimeError("meta has no feature info")
+            meta_label = str(lab).strip().lower()
+            if meta_label in ("up", "down", "neutral"):
+                con_label = meta_label.capitalize()
+                con_conf = float(conf)
+                con_src = "meta"
+            else:
+                con_label = None
+        except Exception as e:
+            st.warning(f"Meta failed to produce conclusive output: {e}. Falling back to ensemble.")
+            con_label = None
+    if con_label is None:
+        valid_rows = [r for r in results if r.get("label") not in ("ERROR", "Unknown", "unknown")]
+        if valid_rows:
+            votes = {}
+            for r in valid_rows:
+                lbl = r["label"].lower() if isinstance(r.get("label"), str) else ""
+                votes.setdefault(lbl, []).append(r.get("confidence", 0.0))
+            best_label = None; best_count = -1; best_conf = -1.0
+            for lbl, confs in votes.items():
+                cnt = len(confs)
+                avgc = float(np.mean(confs)) if confs else 0.0
+                if (cnt > best_count) or (cnt == best_count and avgc > best_conf):
+                    best_label = lbl; best_count = cnt; best_conf = avgc
+            if best_label is not None and best_label in ("up", "down", "neutral"):
+                con_label = best_label.capitalize()
+                con_conf = float(best_conf)
+                con_src = "ensemble"
+            else:
+                con_label = "No reliable consensus"
+                con_conf = 0.0
+                con_src = "none"
+        else:
+            con_label = "No reliable consensus"
+            con_conf = 0.0
+            con_src = "none"
+
+    # Fill prediction_row fields and log
+    prediction_row["predicted_label"] = con_label
+    prediction_row["suggestion"] = map_label_to_suggestion(str(con_label).lower())
+    prediction_row["confidence"] = con_conf
+    try:
+        last_price = raw[ticker]['Close'].iloc[-1]
+        prediction_row["pred_price"] = float(last_price)
+    except Exception:
+        prediction_row["pred_price"] = None
+    history = append_prediction_with_dedup(history, prediction_row, history_file=history_file, save_history_func=save_history)
+    # END LOGGING
+
     with tab2:
         st.subheader("Predictions — next interval (real-time)")
         st.write(f"Ticker: **{ticker}**   •   Fetched latest (Manila): **{fetched_last_ts_manila}**")
@@ -919,6 +1021,10 @@ if run_button:
                 st.dataframe(out)
         else:
             st.warning("No predictions produced.")
+        # ... rest unchanged, see above for consensus display, etc ...
+        # (The rest of the code is unchanged after this point, including tab3/tab4.)
+
+# ... rest of file unchanged (tab3, tab4, recompute_history_evaluations, etc) ...
         con_label = None; con_conf = 0.0; con_src = "ensemble"
         if "meta" in loaded:
             try:
