@@ -1,3 +1,10 @@
+￼
+￼
+Attach
+￼
+Model:
+GPT-4.1
+￼
 # app.py - SOLARIS — Stock Price Movement Predictor (Revised: safer loading, cached downloads, robust history eval, VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD, correct deferred evaluation)
 import os
 import tempfile
@@ -1626,11 +1633,5 @@ def recompute_history_evaluations(history_df, aligned_close_df, save_back=False,
     return out_df
 
 
-# --- Auto-repair history before showing recent predictions ---
-if history is not None and not history.empty:
-    try:
-        history = recompute_history_evaluations(history, aligned_close_for_eval, save_back=False)
-    except Exception as e:
-        st.error(f"Repairing history failed: {e}")
 
 
