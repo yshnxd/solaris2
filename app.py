@@ -1256,28 +1256,6 @@ if run_button:
         if results:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
-with tab3:
-    st.subheader("Detailed Analysis — Defense-Friendly")
-    results = st.session_state.get('results', None)
-    con_conf = st.session_state.get('con_conf', None)
-    chart_df = st.session_state.get('chart_df', None)
-    label_map = st.session_state.get('label_map', ["down", "neutral", "up"])
-    loaded = st.session_state.get('loaded', {})
-
-    if not results:
-        st.info("Run a prediction to see detailed analysis and model outputs.")
-    else:
-        # --- 1) Confidence & Probability Breakdown ---
-        st.markdown("### 1) Confidence & Probability Breakdown")
-        try:
-            import numpy as np
-            class_keys = ['up','neutral','down']
-            agg = {k:0.0 for k in class_keys}
-            count = 0
-            for r in results:
-                raw = r.get('raw')
-                if isinstance(raw, (list, tuple, np.ndarray)) and len(raw) == len(label_map):
-                    for i,p in enumerate(raw):
                         lbl = label_map[i].lower()
                         if lbl in agg:
                             agg[lbl] += float(p)
@@ -1293,10 +1271,8 @@ with tab3:
                 probs = {k: (agg[k] / count) for k in class_keys}
             else:
                 probs = {k:0.0 for k in class_keys}
-
             pct_display = {k: f"{probs[k]*100:.1f}%" for k in class_keys}
             st.write(f"Uptrend: {pct_display['up']} — Neutral: {pct_display['neutral']} — Downtrend: {pct_display['down']}")
-
             try:
                 import plotly.graph_objects as go
                 fig_prob = go.Figure(go.Bar(
@@ -1306,37 +1282,18 @@ with tab3:
                 ))
                 fig_prob.update_layout(height=250, xaxis_title='Probability (%)')
                 st.plotly_chart(fig_prob, use_container_width=True)
-            except Exception:
-                pass
-
-            try:
-                if "meta" in loaded and hasattr(loaded["meta"], "predict_proba"):
-    # After predicting with meta, set con_conf = meta_confidence
-                    con_conf = meta_confidence
-                val = float(con_conf) * 100 if con_conf is not None else 0.0
-                if val > 0:
-                    fig_gauge = go.Figure(go.Indicator(
-                        mode='gauge+number',
-                        value=val,
-                        title={'text': 'Confidence (%)'},
-                        gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#00E5FF"}},
-                        domain={'x': [0, 1], 'y': [0, 1]}
-                    ))
-                   
-                    fig_gauge.update_layout(height=250, margin={'t':20,'b':20,'l':20,'r':20})
-                    st.plotly_chart(fig_gauge, use_container_width=True)
-                else:
-                    st.info("No valid confidence to display.")
             except Exception as e:
-                st.warning(f"Confidence breakdown failed: {e}")
-
+                st.warning(f"Could not create probability chart: {e}")
+        except Exception as e:
+            st.error(f"Error in confidence breakdown: {e}")
         # --- 2) Model Ensemble Outputs ---
         st.markdown("### 2) Model Ensemble Outputs")
         try:
             import pandas as pd
             df_models = pd.DataFrame([{'Model':r['model'].upper(), 'Prediction': r['label'].upper(), 'Confidence': f"{r['confidence']*100:.1f}%"} for r in results])
             st.table(df_models)
-        except Exception:
+        except Exception as e:
+            st.error(f"Could not display model outputs: {e}")
             st.write(results)
 
         # --- 3) Key Technical Indicators Used ---
