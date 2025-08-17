@@ -1,5 +1,4 @@
-￼
-# app.py - SOLARIS — Stock Price Movement Predictor (Revised: safer loading, cached downloads, robust history eval, VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD, correct deferred evaluation)
+￼# app.py - SOLARIS — Stock Price Movement Predictor (Revised: safer loading, cached downloads, robust history eval, VOLATILITY-ADAPTIVE NEUTRAL THRESHOLD, correct deferred evaluation)
 import os
 import tempfile
 import warnings
