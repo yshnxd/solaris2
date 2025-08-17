@@ -1327,7 +1327,6 @@ with tab3:
                     st.plotly_chart(fig_gauge, use_container_width=True)
                 else:
                     st.info("No valid confidence to display.")
-
             except Exception as e:
                 st.warning(f"Confidence breakdown failed: {e}")
 
