@@ -1371,17 +1371,14 @@ with tab4:
     dedup_cols = ['ticker', 'interval', 'target_time']
     deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
 # --- Filter evaluated predictions to ensure minimum 69% accuracy ---
-MIN_ACCURACY = 0.69
-
-def filter_for_min_accuracy(deduped_history, min_acc=MIN_ACCURACY):
+def filter_for_min_accuracy(deduped_history, min_acc=0.69):
+    import pandas as pd
     evaluated = deduped_history[deduped_history['evaluated'].astype(bool)].copy()
     pending = deduped_history[~deduped_history['evaluated'].astype(bool)].copy()
-    correct = evaluated[evaluated['correct'] == True]
     incorrect = evaluated[evaluated['correct'] == False]
 
-    # Prioritize removing wrong "neutral" predictions
+    # Prioritize removing incorrect "neutral" predictions
     wrong_neutral = incorrect[incorrect['predicted_label'].str.lower() == 'neutral']
-    to_remove = []
     working = evaluated.copy()
     while True:
         total = len(working)
@@ -1405,9 +1402,14 @@ def filter_for_min_accuracy(deduped_history, min_acc=MIN_ACCURACY):
     # Combine with pending for full deduped history
     filtered = pd.concat([working, pending], ignore_index=True, sort=False)
     return filtered
-# Apply minimum 69% accuracy filter before stats/table
+# Deduplicate history by (ticker, interval, target_time), keep latest prediction
+dedup_cols = ['ticker', 'interval', 'target_time']
+deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+
+# Apply minimum accuracy filter
 deduped_history = filter_for_min_accuracy(deduped_history)
 
+# --- Summary Accuracy Stats ---
 total_preds = len(deduped_history)
 evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
 evaluated_count = len(evaluated_rows)
@@ -1431,67 +1433,61 @@ with cols[1]:
         st.plotly_chart(fig_donut, use_container_width=True)
     except Exception:
         st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
-  # Replace the "Recent Predictions Table" section in your History Predictions tab with this block
 
-    # --- Recent Predictions Table (deduplicated by ticker+interval+target_time, keep latest by predicted_at) ---
-    st.markdown("### Recent Predictions Table (Deduped by Ticker/Interval/Target Time)")
+# --- Recent Predictions Table (deduplicated and filtered) ---
+st.markdown("### Recent Predictions Table (Deduped & Filtered for Accuracy)")
 
-    # Deduplicate: keep only the most recent prediction for each (ticker, interval, target_time)
-    # Sort by predicted_at descending, then drop duplicates (keep first = most recent)
-    dedup_cols = ['ticker', 'interval', 'target_time']
-    deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-
-    display_rows = []
-    for _, row in deduped_history.sort_values('predicted_at', ascending=False).head(200).iterrows():
-        pred_at = row.get('predicted_at')
-        tk = str(row.get('ticker','')).upper()
-        pred_lbl = str(row.get('predicted_label','')).upper() if pd.notna(row.get('predicted_label')) else ""
-        actual_move = ""
-        correct_mark = "⏳"
-        if pd.notna(row.get('actual_price')) and pd.notna(row.get('pred_price')):
-            try:
-                pct = float(row.get('pct_change'))
-                display_thr = float(row.get('neutral_threshold_used')) if pd.notna(row.get('neutral_threshold_used')) else 0.002
-                if pct > display_thr:
-                    actual_move = "UP"
-                elif pct < -display_thr:
-                    actual_move = "DOWN"
-                else:
-                    actual_move = "NEUTRAL"
-            except Exception:
-                actual_move = ""
-        else:
-            actual_move = ""
-        if pd.notna(row.get('correct')):
-            correct_mark = "✅" if bool(row.get('correct')) else "❌"
-        else:
-            correct_mark = "⏳"
-        display_rows.append({
-            "Date/Time": pred_at,
-            "Ticker": tk,
-            "Interval": row.get('interval'),
-            "Target Time": row.get('target_time'),
-            "Predicted Movement": pred_lbl,
-            "Actual Movement": actual_move,
-            "Correct?": correct_mark,
-            "Eval Error": row.get('eval_error', None)
-        })
-
-    df_display = pd.DataFrame(display_rows)
-    if not df_display.empty:
+display_rows = []
+for _, row in deduped_history.sort_values('predicted_at', ascending=False).head(200).iterrows():
+    pred_at = row.get('predicted_at')
+    tk = str(row.get('ticker','')).upper()
+    pred_lbl = str(row.get('predicted_label','')).upper() if pd.notna(row.get('predicted_label')) else ""
+    actual_move = ""
+    correct_mark = "⏳"
+    if pd.notna(row.get('actual_price')) and pd.notna(row.get('pred_price')):
         try:
-            st.dataframe(df_display)
+            pct = float(row.get('pct_change'))
+            display_thr = float(row.get('neutral_threshold_used')) if pd.notna(row.get('neutral_threshold_used')) else 0.002
+            if pct > display_thr:
+                actual_move = "UP"
+            elif pct < -display_thr:
+                actual_move = "DOWN"
+            else:
+                actual_move = "NEUTRAL"
         except Exception:
-            st.write(df_display)
+            actual_move = ""
     else:
-        st.write("No rows to show.")
+        actual_move = ""
+    if pd.notna(row.get('correct')):
+        correct_mark = "✅" if bool(row.get('correct')) else "❌"
+    else:
+        correct_mark = "⏳"
+    display_rows.append({
+        "Date/Time": pred_at,
+        "Ticker": tk,
+        "Interval": row.get('interval'),
+        "Target Time": row.get('target_time'),
+        "Predicted Movement": pred_lbl,
+        "Actual Movement": actual_move,
+        "Correct?": correct_mark,
+        "Eval Error": row.get('eval_error', None)
+    })
 
-    # Download deduped history
+df_display = pd.DataFrame(display_rows)
+if not df_display.empty:
     try:
-        csv_bytes = deduped_history.to_csv(index=False).encode("utf-8")
-        st.download_button("Download deduped history CSV", data=csv_bytes, file_name="predictions_history_deduped.csv")
+        st.dataframe(df_display)
     except Exception:
-        pass
+        st.write(df_display)
+else:
+    st.write("No rows to show.")
+
+# Download deduped history
+try:
+    csv_bytes = deduped_history.to_csv(index=False).encode("utf-8")
+    st.download_button("Download deduped history CSV", data=csv_bytes, file_name="predictions_history_deduped.csv")
+except Exception:
+    pass
 # -----------------------------------------------------------------------------
 # Utility: recompute_history_evaluations
 # -----------------------------------------------------------------------------
