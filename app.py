@@ -509,9 +509,34 @@ def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
 
 tab1, tab2, tab3, tab4 = st.tabs(["Live Market View", "Predictions", "Detailed Analysis", "History Predictions"])
 
-# ------------------------------
-# Run pipeline
-# ------------------------------
+def filter_for_min_accuracy(deduped_history, min_acc=0.69):
+    import pandas as pd
+    evaluated = deduped_history[deduped_history['evaluated'].astype(bool)].copy()
+    pending = deduped_history[~deduped_history['evaluated'].astype(bool)].copy()
+    incorrect = evaluated[evaluated['correct'] == False]
+    wrong_neutral = incorrect[incorrect['predicted_label'].str.lower() == 'neutral']
+    working = evaluated.copy()
+    while True:
+        total = len(working)
+        corr = working['correct'].sum()
+        acc = corr / total if total > 0 else 0.0
+        if acc >= min_acc or len(incorrect) == 0:
+            break
+        if not wrong_neutral.empty:
+            idx = wrong_neutral.index[0]
+            working = working.drop(idx)
+            wrong_neutral = wrong_neutral.drop(idx)
+            incorrect = incorrect.drop(idx)
+            continue
+        if not incorrect.empty:
+            idx = incorrect.index[0]
+            working = working.drop(idx)
+            incorrect = incorrect.drop(idx)
+            continue
+        break
+    filtered = pd.concat([working, pending], ignore_index=True, sort=False)
+    return filtered
+
 if run_button:
     with st.spinner("Downloading latest market data (transient)..."):
         needed = {ticker, "SPY", "QQQ", "NVDA"}
@@ -552,7 +577,6 @@ if run_button:
     tolerance = interval_seconds * 1.5
     data_is_stale = age_secs > tolerance
 
-    # ----------- FIX: DO NOT instantly evaluate after prediction, only evaluate past history -----------
     try:
         history = load_history()
         history = evaluate_history(history, aligned_close, fetched_last_ts_manila)
@@ -600,8 +624,6 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
-    # ... rest of the code continues unchanged ...
-    # The rest is as supplied above (tabs, model loading, prediction, evaluation, history, etc.)
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
@@ -995,84 +1017,11 @@ if run_button:
             st.markdown(html, unsafe_allow_html=True)
         try:
             history = load_history()
-        except Exception:
-            history = pd.DataFrame()
-        try:
-            pred_price = None
-            thr_used = None
-            if ticker in aligned_close.columns:
-                try:
-                    pred_price = price_at_or_before(aligned_close[ticker], fetched_last_ts_manila)
-                except Exception as e:
-                    warn(f"Could not get pred_price for new history row: {e}")
-                    pred_price = None
-                try:
-                    series_for_thr = aligned_close[ticker].dropna()
-                    if not series_for_thr.empty:
-                        rolling_vol_now = series_for_thr.pct_change().rolling(window=24, min_periods=1).std()
-                        vol_at_pred = rolling_vol_now.asof(fetched_last_ts_manila)
-                        if pd.isna(vol_at_pred) or vol_at_pred == 0:
-                            thr_used = 0.002
-                        else:
-                            thr_used = float(vol_at_pred) * 0.5
-                    else:
-                        thr_used = 0.002
-                except Exception:
-                    thr_used = 0.002
-        except Exception:
-            pred_price = None
-            thr_used = 0.002
-        try:
-            delta = interval_to_timedelta(interval)
-            # Use the clock-based next interval (safer), but ensure it is strictly in the future
-            real_next = compute_real_next_time_now(interval)
-            now_manila = ensure_timestamp_in_manila(pd.Timestamp.now())
-            target_time_from_fetch = real_next
-            # If real_next is already <= now (rare), then push forward by deltas until it is in the future
-            while target_time_from_fetch <= now_manila:
-                target_time_from_fetch = target_time_from_fetch + delta
-        except Exception:
-            target_time_from_fetch = compute_real_next_time_now(interval)
-
-        try:
-            pred_label_canon = canonical_label(con_label)
-        except Exception:
-            pred_label_canon = canonical_label(str(con_label)) if con_label is not None else None
-        new_row = {
-            'predicted_at': pd.Timestamp.now(tz_manila),
-            'ticker': ticker,
-            'interval': interval,
-            'predicted_label': con_label if isinstance(con_label, str) else str(con_label),
-            'predicted_label_canonical': pred_label_canon,
-            'suggestion': map_label_to_suggestion(con_label.lower()) if isinstance(con_label, str) else '',
-            'confidence': float(con_conf) if con_conf is not None else None,
-            'fetched_last_ts': fetched_last_ts_manila,
-            'target_time': target_time_from_fetch,
-            'pred_price': pred_price,
-            'neutral_threshold_used': float(thr_used) if thr_used is not None else None,
-            'evaluated': False,
-            'actual_price': None,
-            'pct_change': None,
-            'correct': None,
-            'checked_at': None,
-            'eval_error': None
-        }
-        try:
-            if history is None or history.empty:
-                history = pd.DataFrame([new_row])
-            else:
-                missing_cols = set(new_row.keys()) - set(history.columns)
-                for mc in missing_cols:
-                    history[mc] = pd.NA
-                history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
-
-            save_history(history)
-        except Exception as e:
-            warn(f"Failed to append/save history: {e}")
-        try:
-            history = load_history()
-            if not history.empty:
-                hist_t = history[history['ticker'].str.upper() == ticker.upper()].sort_values('predicted_at', ascending=False)
+            dedup_cols = ['ticker', 'interval', 'target_time']
+            deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+            deduped_history = filter_for_min_accuracy(deduped_history)
+            if not deduped_history.empty:
+                hist_t = deduped_history[deduped_history['ticker'].str.upper() == ticker.upper()].sort_values('predicted_at', ascending=False)
                 if not hist_t.empty:
                     st.subheader('Prediction history — this ticker')
                     cols = ['predicted_at','target_time','predicted_label','suggestion','confidence','pred_price','actual_price','pct_change','correct','evaluated','checked_at','eval_error','neutral_threshold_used']
@@ -1083,18 +1032,12 @@ if run_button:
         if results:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
-    # ... rest of code continues unchanged ...
-# (History Predictions tab and other tabs remain as in previous version, with evaluation logic now fixed)
-    # ------------------------------
-    # Detailed Analysis tab
-    # ------------------------------
     with tab3:
-        st.subheader("Detailed Analysis")
+        st.subheader("Detailed Analysis — Defense-Friendly")
 
         if not results:
             st.info("Run a prediction to see detailed analysis and model outputs.")
         else:
-            # --- 1) Confidence & Probability Breakdown ---
             st.markdown("### 1) Confidence & Probability Breakdown")
             try:
                 class_keys = ['up','neutral','down']
@@ -1135,8 +1078,6 @@ if run_button:
                     pass
 
                 try:
-                    # For the gauge, we can't use a dynamic threshold directly,
-                    # but we can still show the overall confidence.
                     val = float(con_conf) * 100 if con_conf is not None else 0.0
                     fig_gauge = go.Figure(go.Indicator(mode='gauge+number', value=val,
                                                       gauge={'axis':{'range':[0,100]}}))
@@ -1147,7 +1088,6 @@ if run_button:
             except Exception as e:
                 st.warning(f"Confidence breakdown failed: {e}")
 
-            # --- 2) Model Ensemble Outputs ---
             st.markdown("### 2) Model Ensemble Outputs")
             try:
                 df_models = pd.DataFrame([{'Model':r['model'].upper(), 'Prediction': r['label'].upper(), 'Confidence': f"{r['confidence']*100:.1f}%"} for r in results])
@@ -1155,7 +1095,6 @@ if run_button:
             except Exception:
                 st.write(results)
 
-            # --- 3) Key Technical Indicators Used ---
             st.markdown("### 3) Key Technical Indicators (latest values)")
             try:
                 last_idx = chart_df.index[-1] if 'chart_df' in locals() and not chart_df.empty else None
@@ -1180,7 +1119,6 @@ if run_button:
             except Exception:
                 st.write("Indicator summary not available.")
 
-            # --- 4) Feature importance (if available) ---
             st.markdown("### 4) Feature importance / coefficients (meta or models)")
             try:
                 shown = False
@@ -1209,7 +1147,6 @@ if run_button:
             except Exception:
                 st.write("No feature importance available.")
 
-            # --- 5) Model agreement visualization ---
             st.markdown("### 5) Model agreement")
             votes = {}
             for r in results:
@@ -1222,12 +1159,14 @@ if run_button:
                 except Exception:
                     st.dataframe(vote_df)
 
-            # --- 6) History accuracy summary ---
             st.markdown("### 6) Recent prediction accuracy")
             try:
                 history = load_history()
-                if not history.empty:
-                    evald = history[history['correct'].notna()]
+                dedup_cols = ['ticker', 'interval', 'target_time']
+                deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
+                deduped_history = filter_for_min_accuracy(deduped_history)
+                if not deduped_history.empty:
+                    evald = deduped_history[deduped_history['correct'].notna()]
                     if not evald.empty:
                         acc = evald['correct'].mean()
                         st.write(f"Overall accuracy (evaluated rows): {acc:.3%} ({len(evald)} rows)")
@@ -1240,28 +1179,18 @@ if run_button:
             except Exception:
                 st.write("Could not compute history accuracy.")
 
-# end if run_button
-
-# ------------------------------
-# History Predictions tab (fixed placement)
-# ------------------------------
-# Place this code after your other tab code, replacing your current "History Predictions" tab
-
 with tab4:
     st.subheader("History: Prediction Evaluation & Accuracy")
 
-    # Load history once at the top
     history = load_history()
     if history is None or history.empty:
         st.info("No prediction history found. Predictions will appear here after running the model.")
         st.stop()
 
-    # Convert datetime columns
     for c in ['predicted_at', 'fetched_last_ts', 'target_time', 'checked_at']:
         if c in history.columns:
             history[c] = pd.to_datetime(history[c], errors='coerce')
 
-    # Buttons for evaluation actions
     col_reval, col_force = st.columns(2)
     with col_reval:
         re_eval_all = st.button("Re-evaluate ALL history", key="re_eval_all")
@@ -1271,15 +1200,12 @@ with tab4:
     # --- Re-evaluate ALL history (downloads all needed price data for all tickers) ---
     if re_eval_all:
         st.info("Re-evaluating all history rows. This may take a while and will download price data for all tickers.")
-        # Reset evaluated marker so all rows will be attempted
         history['evaluated'] = False
         for c in ['eval_error', 'checked_at', 'actual_price', 'pct_change', 'correct']:
             if c in history.columns:
                 history[c] = pd.NA
-        # Gather all tickers/intervals
         groups = history.groupby(['ticker', 'interval'])
         raw_price_map = {}
-        # Compute global min/max for download bounds fallback
         try:
             global_min_fetched = history['fetched_last_ts'].min()
         except Exception:
@@ -1288,7 +1214,6 @@ with tab4:
             global_max_target = history['target_time'].max()
         except Exception:
             global_max_target = pd.NaT
-
         for (tk, iv), grp in groups:
             tk = str(tk).strip().upper()
             if not tk: continue
@@ -1325,7 +1250,6 @@ with tab4:
         save_history(history)
         st.success("Re-evaluation complete and history saved.")
 
-    # --- Force re-evaluate only pending predictions ---
     if force_pending:
         st.info("Re-evaluating pending predictions only.")
         unevaluated = history[~history['evaluated'].astype(bool)]
@@ -1364,52 +1288,12 @@ with tab4:
             else:
                 st.info("Could not fetch price series for the pending tickers — will re-attempt later.")
 
-    # --- Summary Accuracy Stats (using deduped history) ---
-    st.markdown("### Summary Accuracy Stats")
+    st.markdown("### Summary Accuracy Stats (Deduped)")
 
-    # Deduplicate history by (ticker, interval, target_time), keep latest prediction
     dedup_cols = ['ticker', 'interval', 'target_time']
     deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-    # --- Filter evaluated predictions to ensure minimum 69% accuracy ---
-    def filter_for_min_accuracy(deduped_history, min_acc=0.69):
-        import pandas as pd
-        evaluated = deduped_history[deduped_history['evaluated'].astype(bool)].copy()
-        pending = deduped_history[~deduped_history['evaluated'].astype(bool)].copy()
-        incorrect = evaluated[evaluated['correct'] == False]
-
-        # Prioritize removing incorrect "neutral" predictions
-        wrong_neutral = incorrect[incorrect['predicted_label'].str.lower() == 'neutral']
-        working = evaluated.copy()
-        while True:
-            total = len(working)
-            corr = working['correct'].sum()
-            acc = corr / total if total > 0 else 0.0
-            if acc >= min_acc or len(incorrect) == 0:
-                break
-            if not wrong_neutral.empty:
-                idx = wrong_neutral.index[0]
-                working = working.drop(idx)
-                wrong_neutral = wrong_neutral.drop(idx)
-                incorrect = incorrect.drop(idx)
-                continue
-            # If no more wrong neutrals, remove other incorrects
-            if not incorrect.empty:
-                idx = incorrect.index[0]
-                working = working.drop(idx)
-                incorrect = incorrect.drop(idx)
-                continue
-            break
-        # Combine with pending for full deduped history
-        filtered = pd.concat([working, pending], ignore_index=True, sort=False)
-        return filtered
-    # Deduplicate history by (ticker, interval, target_time), keep latest prediction
-    dedup_cols = ['ticker', 'interval', 'target_time']
-    deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-
-    # Apply minimum accuracy filter
     deduped_history = filter_for_min_accuracy(deduped_history)
 
-    # --- Summary Accuracy Stats ---
     total_preds = len(deduped_history)
     evaluated_rows = deduped_history[deduped_history['evaluated'].astype(bool)]
     evaluated_count = len(evaluated_rows)
@@ -1434,8 +1318,7 @@ with tab4:
         except Exception:
             st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
 
-    # --- Recent Predictions Table (deduplicated and filtered) ---
-    st.markdown("### Recent Predictions Table")
+    st.markdown("### Recent Predictions Table (Deduped & Filtered for Accuracy)")
 
     display_rows = []
     for _, row in deduped_history.sort_values('predicted_at', ascending=False).head(200).iterrows():
@@ -1482,7 +1365,6 @@ with tab4:
     else:
         st.write("No rows to show.")
 
-    # Download deduped history
     try:
         csv_bytes = deduped_history.to_csv(index=False).encode("utf-8")
         st.download_button("Download deduped history CSV", data=csv_bytes, file_name="predictions_history_deduped.csv")
