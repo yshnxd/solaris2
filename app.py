@@ -387,7 +387,15 @@ def append_prediction_with_dedup(history, new_row, history_file=None, save_histo
         new_key = (str(new_row.get('ticker','')).upper(), str(new_row.get('interval','')), str(new_tgt_norm))
         mask_same = (hist_ticker == new_key[0]) & (hist_interval == new_key[1]) & (hist_target_norm == new_key[2])
 
-history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
+        if mask_same.any():
+            history = history.loc[~mask_same].reset_index(drop=True)
+
+        missing_cols = set(new_row.keys()) - set(history.columns)
+        for mc in missing_cols:
+            history[mc] = pd.NA
+
+        out = pd.concat([history, pd.DataFrame([new_row])], ignore_index=True, sort=False)
+
     # try to save if requested
     try:
         if save_history_func is not None:
@@ -1068,7 +1076,8 @@ if run_button:
                 missing_cols = set(new_row.keys()) - set(history.columns)
                 for mc in missing_cols:
                     history[mc] = pd.NA
-                history = pd.concat([history, pd.DataFrame([new_row])], ignore_index=True, sort=False)
+           history = append_prediction_with_dedup(history, new_row, history_file=history_file, save_history_func=save_history)
+
             save_history(history)
         except Exception as e:
             warn(f"Failed to append/save history: {e}")
