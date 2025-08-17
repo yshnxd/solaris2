@@ -900,8 +900,8 @@ if run_button:
                                     lab_idx = int(rawinfo)
                                     if 0 <= lab_idx < len(label_map):
                                         lab_canon = label_map[lab_idx].lower()
-                                except Exception:
-                                    pass
+                            except Exception:
+                                pass
                         lab_display = lab_canon.capitalize() if lab_canon in ("up","down","neutral") else lab_str.capitalize()
                         results.append({
                             "model": name,
