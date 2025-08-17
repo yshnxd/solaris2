@@ -1365,7 +1365,7 @@ with tab4:
                 st.info("Could not fetch price series for the pending tickers — will re-attempt later.")
 
     # --- Summary Accuracy Stats (using deduped history) ---
-    st.markdown("### Summary Accuracy Stats (Deduped)")
+    st.markdown("### Summary Accuracy Stats")
 
     # Deduplicate history by (ticker, interval, target_time), keep latest prediction
     dedup_cols = ['ticker', 'interval', 'target_time']
@@ -1435,7 +1435,7 @@ with cols[1]:
         st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
 
 # --- Recent Predictions Table (deduplicated and filtered) ---
-st.markdown("### Recent Predictions Table (Deduped & Filtered for Accuracy)")
+st.markdown("### Recent Predictions Table")
 
 display_rows = []
 for _, row in deduped_history.sort_values('predicted_at', ascending=False).head(200).iterrows():
