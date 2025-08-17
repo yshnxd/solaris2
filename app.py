@@ -1310,6 +1310,9 @@ with tab3:
                 pass
 
             try:
+                if "meta" in loaded and hasattr(loaded["meta"], "predict_proba"):
+    # After predicting with meta, set con_conf = meta_confidence
+                    con_conf = meta_confidence
                 val = float(con_conf) * 100 if con_conf is not None else 0.0
                 if val > 0:
                     fig_gauge = go.Figure(go.Indicator(
