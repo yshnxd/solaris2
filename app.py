@@ -354,13 +354,8 @@ def price_at_or_before(series: pd.Series, when_ts: pd.Timestamp):
         first_valid = s.dropna()
         return float(first_valid.iloc[0]) if not first_valid.empty else float("nan")
     return float("nan")
+
 def append_prediction_with_dedup(history, new_row, history_file=None, save_history_func=None):
-    """
-    Append new_row to history DataFrame while deduplicating by (ticker, interval, target_time).
-    If an existing row with the same key exists it will be removed and replaced by new_row.
-    If history is None or empty, returns a new DataFrame with new_row.
-    If save_history_func is provided, it will be called with the resulting history for persistence.
-    """
     import pandas as pd
 
     if history is None or (hasattr(history, 'empty') and history.empty):
@@ -396,7 +391,6 @@ def append_prediction_with_dedup(history, new_row, history_file=None, save_histo
 
         out = pd.concat([history, pd.DataFrame([new_row])], ignore_index=True, sort=False)
 
-    # try to save if requested
     try:
         if save_history_func is not None:
             save_history_func(out)
@@ -407,15 +401,7 @@ def append_prediction_with_dedup(history, new_row, history_file=None, save_histo
 
     return out
 
-
 def evaluate_history(history_df, aligned_close_df, current_fetched_ts):
-    """
-    Evaluate unevaluated rows in history_df using aligned_close_df price data.
-    - Only evaluates rows whose target_time is strictly in the past compared to current_fetched_ts.
-    - Uses a small safety buffer (fraction of interval) so predictions made *very recently* are not evaluated.
-    - Preference order for pred_price: stored pred_price -> price at predicted_at -> fetched_last_ts -> price just before target_time.
-    - Neutral threshold is volatility-adaptive (rolling std of returns scaled).
-    """
     import pandas as pd
     import numpy as np
     from zoneinfo import ZoneInfo
@@ -614,6 +600,8 @@ if run_button:
         st.error("Not enough history to compute features for this ticker; increase period.")
         st.stop()
 
+    # ... rest of the code continues unchanged ...
+    # The rest is as supplied above (tabs, model loading, prediction, evaluation, history, etc.)
     with tab1:
         st.subheader(f"Live Market View — {ticker}")
         st.write(f"Fetched latest timestamp (converted to Manila): **{fetched_last_ts_manila}**")
