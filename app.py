@@ -1033,7 +1033,7 @@ if run_button:
             st.download_button("Download per-model predictions CSV", data=pd.DataFrame(results).to_csv(index=False).encode("utf-8"), file_name="predictions_next_interval.csv")
 
     with tab3:
-        st.subheader("Detailed Analysis — Defense-Friendly")
+        st.subheader("Detailed Analysis")
 
         if not results:
             st.info("Run a prediction to see detailed analysis and model outputs.")
@@ -1288,7 +1288,7 @@ with tab4:
             else:
                 st.info("Could not fetch price series for the pending tickers — will re-attempt later.")
 
-    st.markdown("### Summary Accuracy Stats (Deduped)")
+    st.markdown("### Summary Accuracy Stats")
 
     dedup_cols = ['ticker', 'interval', 'target_time']
     deduped_history = history.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
@@ -1318,7 +1318,7 @@ with tab4:
         except Exception:
             st.write(f"Correct: {correct_count}  Incorrect: {incorrect}  Pending: {pending_count}")
 
-    st.markdown("### Recent Predictions Table (Deduped & Filtered for Accuracy)")
+    st.markdown("### Recent Predictions Table")
 
     display_rows = []
     for _, row in deduped_history.sort_values('predicted_at', ascending=False).head(200).iterrows():
@@ -1367,7 +1367,7 @@ with tab4:
 
     try:
         csv_bytes = deduped_history.to_csv(index=False).encode("utf-8")
-        st.download_button("Download deduped history CSV", data=csv_bytes, file_name="predictions_history_deduped.csv")
+        st.download_button("Download history CSV", data=csv_bytes, file_name="predictions_history_deduped.csv")
     except Exception:
         pass
 # -----------------------------------------------------------------------------
