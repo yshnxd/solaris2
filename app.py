@@ -1,7 +1,7 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
+import yfinance as yf
 import joblib
 import datetime
 import plotly.graph_objects as go
@@ -16,86 +16,27 @@ st.set_page_config(
 
 # --- Constants ---
 START_CAPITAL = 10000
-MODEL_DIR = '.'  # Change if models are in a different folder
 
 # --- Load Models & Scaler ---
 @st.cache_data(show_spinner=False)
 def load_models():
-    cnn_model = joblib.load(os.path.join(MODEL_DIR, "cnn_model.pkl"))
-    lstm_model = joblib.load(os.path.join(MODEL_DIR, "lstm_model.pkl"))
-    xgb_model = joblib.load(os.path.join(MODEL_DIR, "xgb_model.pkl"))
-    meta_model = joblib.load(os.path.join(MODEL_DIR, "meta_learner.pkl"))
-    scaler = joblib.load(os.path.join(MODEL_DIR, "scaler.pkl"))
+    cnn_model = joblib.load("cnn_model.pkl")
+    lstm_model = joblib.load("lstm_model.pkl")
+    xgb_model = joblib.load("xgb_model.pkl")
+    meta_model = joblib.load("meta_learner.pkl")
+    scaler = joblib.load("scaler.pkl")
     return cnn_model, lstm_model, xgb_model, meta_model, scaler
 
-cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
+try:
+    cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
+    model_loaded = True
+except Exception as e:
+    model_loaded = False
+    st.error(f"Model loading error: {e}")
 
-# --- Utility: Feature Engineering for Live Data ---
-def make_features(df, aligned_close=None, ticker=None):
-    # df: dataframe with columns Open, High, Low, Close, Volume
-    # aligned_close: dataframe of aligned closes for cross-asset features
-    # ticker: str
-
-    feat = pd.DataFrame(index=df.index)
-    price_series = df['Close']
-
-    # Lag returns
-    for lag in [1, 3, 6, 12, 24]:
-        feat[f"ret_{lag}h"] = price_series.pct_change(lag)
-
-    # Rolling volatility
-    for window in [6, 12, 24]:
-        feat[f"vol_{window}h"] = price_series.pct_change().rolling(window).std()
-
-    # RSI (simple)
-    delta = price_series.diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    roll_up = up.rolling(14).mean()
-    roll_down = down.rolling(14).mean()
-    rs = roll_up / roll_down
-    feat["rsi_14"] = 100 - (100 / (1 + rs))
-
-    # MACD (simple)
-    ema12 = price_series.ewm(span=12, adjust=False).mean()
-    ema26 = price_series.ewm(span=26, adjust=False).mean()
-    macd = ema12 - ema26
-    signal = macd.ewm(span=9, adjust=False).mean()
-    feat["macd"] = macd
-    feat["macd_signal"] = signal
-
-    # Moving averages
-    for w in [5, 10, 20]:
-        feat[f"sma_{w}"] = price_series.rolling(w).mean()
-        feat[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
-
-    # Volume
-    if "Volume" in df.columns:
-        vol_series = df["Volume"]
-        feat["vol_change_1h"] = vol_series.pct_change()
-        feat["vol_ma_24h"] = vol_series.rolling(24).mean()
-
-    # Calendar features
-    feat["hour"] = feat.index.hour
-    feat["day_of_week"] = feat.index.dayofweek
-
-    # Cross-asset returns (if aligned_close given)
-    asset_list = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
-    if aligned_close is not None:
-        for asset in asset_list:
-            if asset in aligned_close.columns:
-                asset_series = aligned_close[asset].reindex(feat.index).ffill()
-                feat[f"{asset}_ret_1h"] = asset_series.pct_change()
-
-    feat["datetime"] = feat.index
-    feat["ticker"] = ticker
-    feat = feat.dropna().tail(1)  # Use the latest row
-
-    return feat
-
-# --- Utility: Get Yahoo Finance Data ---
+# --- Data Gathering & Preprocessing (based on typical notebook workflow) ---
 @st.cache_data(show_spinner=True)
-def get_yf_data(ticker, ndays):
+def get_yf_data(ticker, ndays=7):
     interval = "60m"
     period = f"{ndays}d"
     df = yf.download(ticker, interval=interval, period=period)
@@ -103,35 +44,68 @@ def get_yf_data(ticker, ndays):
     df.index = pd.to_datetime(df.index)
     return df
 
+def make_features(df):
+    feat = pd.DataFrame(index=df.index)
+    price_series = df['Close']
+
+    # Lag returns
+    for lag in [1, 3, 6, 12, 24]:
+        feat[f"ret_{lag}h"] = price_series.pct_change(lag)
+    # Rolling volatility
+    for window in [6, 12, 24]:
+        feat[f"vol_{window}h"] = price_series.pct_change().rolling(window).std()
+    # RSI
+    delta = price_series.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up = up.rolling(14).mean()
+    roll_down = down.rolling(14).mean()
+    rs = roll_up / roll_down
+    feat["rsi_14"] = 100 - (100 / (1 + rs))
+    # MACD
+    ema12 = price_series.ewm(span=12, adjust=False).mean()
+    ema26 = price_series.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    feat["macd"] = macd
+    feat["macd_signal"] = signal
+    # Moving averages
+    for w in [5, 10, 20]:
+        feat[f"sma_{w}"] = price_series.rolling(w).mean()
+        feat[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
+    # Volume
+    if "Volume" in df.columns:
+        vol_series = df["Volume"]
+        feat["vol_change_1h"] = vol_series.pct_change()
+        feat["vol_ma_24h"] = vol_series.rolling(24).mean()
+    # Calendar features
+    feat["hour"] = feat.index.hour
+    feat["day_of_week"] = feat.index.dayofweek
+    # Drop NA and keep last row for prediction
+    feat = feat.dropna().tail(1)
+    return feat
+
 # --- Utility: Prediction Pipeline ---
-def predict_next_hour(ticker, aligned_close=None):
-    # 1. Get last 128 hours for sequence models, last row for tabular
-    df = get_yf_data(ticker, ndays=6)  # 5+ days for 128 hours
+def predict_next_hour(ticker):
+    df = get_yf_data(ticker, ndays=6)
     if len(df) < 128:
         return None, "Not enough hourly data for prediction.", None
-
-    features = make_features(df, aligned_close=aligned_close, ticker=ticker)
+    features = make_features(df)
     if features.shape[0] == 0:
         return None, "Not enough valid features for prediction.", None
-
-    # Prepare inputs for models
-    X_tab = features.drop(columns=['datetime', 'ticker']).values
+    X_tab = features.values
     X_tab_scaled = scaler.transform(X_tab)
-    X_seq = []
-    seq_df = df.tail(128)
-    seq_features = make_features(seq_df, aligned_close=aligned_close, ticker=ticker)
+    # Sequence models: use last 128 rows for LSTM/CNN
+    seq_features = []
     for i in range(128):
-        # For live, we can just use tabular features of last 128 hours
-        seq_feat = make_features(df.iloc[:-(128-i)], aligned_close=aligned_close, ticker=ticker)
-        if seq_feat.shape[0] == 0:
+        f = make_features(df.iloc[:-(128-i)])
+        if f.shape[0] == 0:
             continue
-        X_seq.append(seq_feat.drop(columns=['datetime', 'ticker']).values[0])
-    if len(X_seq) < 128:
-        # fallback: repeat last valid row
-        X_seq = [X_tab_scaled[0]] * 128
-    X_seq = np.array(X_seq).reshape(1, 128, X_tab_scaled.shape[1])
-
-    # Model predictions
+        seq_features.append(f.values[0])
+    if len(seq_features) < 128:
+        seq_features = [X_tab_scaled[0]] * 128
+    X_seq = np.array(seq_features).reshape(1, 128, X_tab_scaled.shape[1])
+    # Predict
     pred_cnn = cnn_model.predict(X_seq, verbose=0)[0][0]
     pred_lstm = lstm_model.predict(X_seq, verbose=0)[0][0]
     pred_xgb = xgb_model.predict(X_tab_scaled)[0]
@@ -141,23 +115,16 @@ def predict_next_hour(ticker, aligned_close=None):
                         np.max([pred_cnn, pred_lstm, pred_xgb]),
                         np.min([pred_cnn, pred_lstm, pred_xgb])]])
     pred_meta = meta_model.predict(meta_X)[0]
-
-    # Current price
     current_price = df.iloc[-1]['Close']
     predicted_price = current_price * (1 + pred_meta)
     pct_change = pred_meta * 100
     direction = "UP" if pred_meta > 0 else "DOWN" if pred_meta < 0 else "HOLD"
-
-    # Model confidence (simulate with inverse std of base models)
     confidence = max(0, min(100, 100 - np.std([pred_cnn, pred_lstm, pred_xgb]) * 9000))
-
-    # Ensemble votes
     votes = {
         "CNN": "UP" if pred_cnn > 0 else "DOWN" if pred_cnn < 0 else "HOLD",
         "LSTM": "UP" if pred_lstm > 0 else "DOWN" if pred_lstm < 0 else "HOLD",
         "XGBoost": "UP" if pred_xgb > 0 else "DOWN" if pred_xgb < 0 else "HOLD"
     }
-
     return {
         "predicted_price": predicted_price,
         "current_price": current_price,
@@ -171,7 +138,7 @@ def predict_next_hour(ticker, aligned_close=None):
         "pred_xgb": pred_xgb
     }, None, df
 
-# --- Virtual Trading Log (in-memory, could use st.session_state or persistent file/db) ---
+# --- Virtual Trading Log ---
 if "trade_log" not in st.session_state:
     st.session_state.trade_log = []
 
@@ -183,34 +150,47 @@ def get_trade_log_df():
 
 # --- App Layout ---
 st.title("SOLARIS : A Machine Learning Based Hourly Stock Prediction Tool")
-st.subheader("A ML Model combining Convolutional Neural Networks (CNN), Long Short-Term Memory (LSTM) networks, and XGBoost with a Meta Learner Ensemble for Short Term Stock Market Prediction")
+st.subheader("A ML Model combining CNN, LSTM, and XGBoost with a Meta Learner Ensemble for Short Term Stock Market Prediction")
 
 st.markdown("""
 This project explores the potential of ensemble deep learning models to identify short-term patterns in financial time series data for hourly price prediction.  
 **Note:** This tool is for educational and research purposes only. Not financial advice!
 """)
 
+st.header("1. Data Gathering & Preprocessing")
+
+st.markdown("""
+**Data Source:** Yahoo Finance  
+**Preprocessing Steps:**  
+- Download hourly OHLCV data for selected ticker  
+- Feature engineering: lag returns, volatility, RSI, MACD, moving averages, volume features  
+- Calendar features: hour, day of week  
+""")
+
+with st.expander("Show raw data & engineered features"):
+    ticker_demo = st.text_input("Preview ticker (e.g., AAPL, TSLA, MSFT):", value="AAPL")
+    df_raw = get_yf_data(ticker_demo, ndays=7)
+    st.dataframe(df_raw.tail(10))
+    st.write("Engineered Features (last row):")
+    st.dataframe(make_features(df_raw))
+
 st.divider()
 
-# === SECTION 1: LIVE PREDICTION DASHBOARD ===
-st.header("Live Prediction Dashboard")
+# === SECTION 2: LIVE PREDICTION DASHBOARD ===
+st.header("2. Live Prediction Dashboard")
 
 col1, col2 = st.columns([2, 1])
 with col1:
-    ticker = st.text_input("Enter Stock Ticker (e.g., AAPL, TSLA, MSFT):", value="AAPL")
+    ticker = st.text_input("Enter Stock Ticker for Prediction:", value="AAPL", key="pred_ticker")
     ndays = st.selectbox("Number of historical days to display", options=[1, 7, 30], index=1)
     predict_btn = st.button("🚀 Predict Next Hour")
 
-with col2:
-    st.empty()  # For extra controls if needed
-
-if predict_btn and ticker:
+if predict_btn and ticker and model_loaded:
     with st.spinner(f"Predicting next hour for {ticker}..."):
         result, error, df = predict_next_hour(ticker)
     if error:
         st.error(error)
     else:
-        # --- Price Chart ---
         st.subheader(f"Live Price Chart for {ticker}")
         df_plot = get_yf_data(ticker, ndays)
         fig = go.Figure()
@@ -222,36 +202,32 @@ if predict_btn and ticker:
             close=df_plot['Close'],
             name='Price'
         ))
-        # Mark "NOW"
         now = df_plot.index[-1]
         fig.add_vline(x=now, line_dash="dash", line_color="blue", annotation_text="Now", annotation_position="top left")
-        # Predicted price point
         pred_time = now + pd.Timedelta(hours=1)
         fig.add_trace(go.Scatter(
             x=[pred_time],
             y=[result["predicted_price"]],
             mode="markers+text",
             marker=dict(color="green" if result["direction"] == "UP" else "red", size=12),
-            text=[f'Predicted: ${result["predicted_price"]:.2f}'],
+            text=[f'Pred: ${result["predicted_price"]:.2f}'],
             textposition="bottom center",
             name='Prediction'
         ))
         fig.update_layout(height=400, xaxis_title="Time", yaxis_title="Price ($)")
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- Prediction Result Card ---
         st.markdown("#### Prediction Result")
         pcol1, pcol2, pcol3, pcol4 = st.columns(4)
         pcol1.metric("Predicted Price (1H)", f"${result['predicted_price']:.2f}")
-        pcol2.metric("Direction & Magnitude", f"{result['direction']} ({result['pct_change']:+.2f}%)")
+        pcol2.metric("Direction", f"{result['direction']} ({result['pct_change']:+.2f}%)")
         pcol3.progress(int(result['confidence']), text=f"Model Confidence: {int(result['confidence'])}%")
         pcol4.markdown(f"**Ensemble Votes:**<br>"
             f"<span style='color:green'>CNN: {result['votes']['CNN']}</span><br>"
-            f"<span style='color:red'>LSTM: {result['votes']['LSTM']}</span><br>"
+            f"<span style='color:blue'>LSTM: {result['votes']['LSTM']}</span><br>"
             f"<span style='color:purple'>XGBoost: {result['votes']['XGBoost']}</span>", unsafe_allow_html=True)
 
-        # --- Trading Suggestion ---
-        threshold = 0.2  # percent threshold for "STRONG" signal
+        threshold = 0.2
         if abs(result['pct_change']) > threshold:
             signal = "STRONG BUY" if result['direction'] == "UP" else "STRONG SELL"
         elif abs(result['pct_change']) > 0.05:
@@ -259,9 +235,8 @@ if predict_btn and ticker:
         else:
             signal = "HOLD"
         st.info(f"**SIGNAL:** {signal}\n\n"
-                f"The model predicts a {result['pct_change']:+.2f}% {'increase' if result['direction']=='UP' else 'decrease'} within the next hour, with high confidence ({int(result['confidence'])}%).")
+                f"The model predicts a {result['pct_change']:+.2f}% {'increase' if result['direction']=='UP' else 'decrease'} in the next hour.")
 
-        # --- Log the trade for simulation ---
         entry = {
             "Timestamp": now,
             "Ticker": ticker,
@@ -273,7 +248,7 @@ if predict_btn and ticker:
             "LSTM": result["votes"]["LSTM"],
             "XGBoost": result["votes"]["XGBoost"],
             "Signal": signal,
-            "Profit (%)": None,  # Will be filled after 1H
+            "Profit (%)": None,
             "Actual Price (1H Later)": None,
             "Direction (Actual)": None,
             "Was Correct?": None
@@ -282,13 +257,11 @@ if predict_btn and ticker:
 
 st.divider()
 
-# === SECTION 2: SIMULATION & PERFORMANCE TRACKING ===
-st.header("Trading Simulation Log & Performance")
+# === SECTION 3: SIMULATION & PERFORMANCE TRACKING ===
+st.header("3. Trading Simulation Log & Performance")
 
-# --- Update trade log with actual price (if available) ---
 trade_df = get_trade_log_df()
 if not trade_df.empty:
-    # For all entries without actual price, try to fetch it
     for idx, row in trade_df.iterrows():
         if pd.isnull(row.get("Actual Price (1H Later)")):
             ts = row["Timestamp"]
@@ -305,27 +278,18 @@ if not trade_df.empty:
                 st.session_state.trade_log[idx]["Direction (Actual)"] = direction_actual
                 st.session_state.trade_log[idx]["Was Correct?"] = "Yes" if was_correct else "No"
                 st.session_state.trade_log[idx]["Profit (%)"] = profit
-
     trade_df = get_trade_log_df()
-
-st.dataframe(trade_df, use_container_width=True, height=300)
-
-# --- Performance Metrics ---
-if not trade_df.empty:
+    st.dataframe(trade_df, use_container_width=True, height=300)
     total_return = trade_df["Profit (%)"].dropna().sum()
     accuracy = trade_df["Was Correct?"].dropna().eq("Yes").mean() * 100 if "Was Correct?" in trade_df else 0
     num_trades = trade_df["Signal"].dropna().apply(lambda x: x != "HOLD").sum()
     win_rate = trade_df["Profit (%)"].dropna().apply(lambda x: x > 0).mean() * 100 if num_trades > 0 else 0
     avg_profit = trade_df["Profit (%)"].dropna().mean()
-
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
     mcol1.metric("Total Return (%)", f"{total_return:.2f}%")
     mcol2.metric("Accuracy (%)", f"{accuracy:.2f}%")
     mcol3.metric("Win Rate (%)", f"{win_rate:.2f}%")
     mcol4.metric("Avg Profit per Trade (%)", f"{avg_profit:.2f}%")
-
-    # --- Equity Curve ---
-    st.subheader("Virtual Portfolio Growth")
     equity_curve = [START_CAPITAL]
     for _, row in trade_df.iterrows():
         profit = row.get("Profit (%)", 0)
@@ -338,14 +302,12 @@ if not trade_df.empty:
 
 st.divider()
 
-# === SECTION 3: MODEL EXPLANATION & TECHNICAL DETAILS ===
-st.header("Model Explanation & Technical Details")
+# === SECTION 4: MODEL EXPLANATION & TECHNICAL DETAILS ===
+st.header("4. Model Explanation & Technical Details")
 
 exp_col1, exp_col2 = st.columns([2,1])
-
 with exp_col1:
     st.subheader("How the Meta-Learner Works")
-    st.image("meta_learner_diagram.png", caption="SOLARIS Model Ensemble Architecture", use_column_width=True)
     st.markdown("""
     **Flow:**  
     Input Data → CNN Block → LSTM Block → XGBoost → Meta-Learner (Stacked/Averaged) → Final Prediction  
@@ -354,12 +316,10 @@ with exp_col1:
     - **XGBoost:** Handles tabular/structured features  
     - **Meta-Learner:** Weighted/stacked ensemble for final output
     """)
-
 with exp_col2:
     st.subheader("Feature Importance (XGBoost)")
-    if hasattr(xgb_model, "feature_importances_"):
-        # Get feature names - must match order used in tabular input
-        feat_names = [col for col in make_features(get_yf_data("AAPL", 2), ticker="AAPL").columns if col not in ["datetime", "ticker"]]
+    try:
+        feat_names = [col for col in make_features(get_yf_data("AAPL", 2)).columns]
         importances = xgb_model.feature_importances_
         top_idx = np.argsort(importances)[-10:]
         top_feats = [feat_names[i] for i in top_idx]
@@ -367,8 +327,14 @@ with exp_col2:
         imp_fig = go.Figure(go.Bar(x=top_vals, y=top_feats, orientation="h"))
         imp_fig.update_layout(height=300, xaxis_title="Importance")
         st.plotly_chart(imp_fig, use_container_width=True)
-    else:
+    except Exception as e:
         st.info("Feature importances not available for XGBoost model.")
 
 st.subheader("Technical Stack")
 st.markdown("""
+- **Streamlit:** App UI & dashboard
+- **yfinance:** Hourly price data
+- **CNN, LSTM, XGBoost:** Model ensemble
+- **Meta Learner:** Final prediction
+- **Plotly:** Interactive charts
+""")
