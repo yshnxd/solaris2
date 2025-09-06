@@ -9,3 +9,4 @@ joblib
 pytz
 tensorflow
 xgboost
+torch
