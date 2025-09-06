@@ -76,6 +76,13 @@ and XGBoost with a Meta Learner Ensemble for short-term stock market predictions
 # Initialize session state for prediction log
 if 'prediction_log' not in st.session_state:
     st.session_state.prediction_log = []
+if 'performance_metrics' not in st.session_state:
+    st.session_state.performance_metrics = {
+        'total_predictions': 0,
+        'correct_predictions': 0,
+        'total_return': 0,
+        'accuracy': 0
+    }
 
 # Load models (with caching)
 @st.cache_resource
@@ -109,6 +116,7 @@ except ValueError:
     days_history = 180
 
 run_prediction = st.sidebar.button("🚀 Predict Next Hour")
+update_predictions = st.sidebar.button("🔄 Update Prediction Results")
 
 # Function to fetch stock data
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -213,19 +221,76 @@ def predict_with_model(features, current_price):
     
     return predicted_price, pred_change_pct, votes, confidence
 
-# Backtest performance metrics (from your actual results)
-BACKTEST_METRICS = {
-    "start_capital": 10000.00,
-    "final_capital": 33997.15,
-    "total_pnl": 23997.15,
-    "total_pnl_pct": 239.97,
-    "total_trades": 8944,
-    "avg_hourly_pnl": 2.6830,
-    "hourly_pnl_std": 91.1666
-}
+# Function to update prediction results with actual prices
+def update_prediction_results():
+    """Update prediction log with actual prices and calculate accuracy"""
+    if not st.session_state.prediction_log:
+        return
+    
+    updated_log = []
+    correct_predictions = 0
+    total_return = 0
+    
+    for prediction in st.session_state.prediction_log:
+        # Check if we already have the actual price
+        if 'actual_price' not in prediction:
+            # Fetch the actual price for the prediction time + 1 hour
+            ticker = prediction['ticker']
+            prediction_time = datetime.strptime(prediction['timestamp'], "%Y-%m-%d %H:%M")
+            target_time = prediction_time + timedelta(hours=1)
+            
+            # Fetch data for the target time
+            try:
+                # Get data for the day of the prediction
+                stock_data = fetch_stock_data(ticker, period="2d", interval="60m")
+                
+                # Find the closest time to our target
+                time_diff = abs(stock_data.index - target_time)
+                closest_idx = time_diff.argmin()
+                actual_price = stock_data.iloc[closest_idx]['Close']
+                
+                # Calculate if prediction was correct
+                predicted_direction = "UP" if prediction['predicted_price'] > prediction['current_price'] else "DOWN"
+                actual_direction = "UP" if actual_price > prediction['current_price'] else "DOWN"
+                correct = predicted_direction == actual_direction
+                
+                # Calculate return
+                return_pct = (actual_price - prediction['current_price']) / prediction['current_price'] * 100
+                
+                # Update prediction with actual data
+                prediction['actual_price'] = actual_price
+                prediction['actual_direction'] = actual_direction
+                prediction['correct'] = correct
+                prediction['return_pct'] = return_pct
+                
+                # Update metrics
+                if correct:
+                    correct_predictions += 1
+                total_return += return_pct
+                
+            except Exception as e:
+                st.error(f"Error updating prediction for {ticker}: {str(e)}")
+        
+        updated_log.append(prediction)
+    
+    # Update the log
+    st.session_state.prediction_log = updated_log
+    
+    # Update performance metrics
+    if st.session_state.prediction_log:
+        st.session_state.performance_metrics['total_predictions'] = len(st.session_state.prediction_log)
+        st.session_state.performance_metrics['correct_predictions'] = correct_predictions
+        st.session_state.performance_metrics['accuracy'] = correct_predictions / len(st.session_state.prediction_log) * 100
+        st.session_state.performance_metrics['total_return'] = total_return
+        st.session_state.performance_metrics['avg_return'] = total_return / len(st.session_state.prediction_log)
 
 # Main app
 if models_loaded:
+    # Update prediction results if requested
+    if update_predictions:
+        with st.spinner('Updating prediction results...'):
+            update_prediction_results()
+    
     # Fetch data for selected ticker
     stock_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
     
@@ -342,34 +407,46 @@ if models_loaded:
                     # Log the prediction
                     prediction_time = datetime.now()
                     log_entry = {
-                        "Timestamp": prediction_time.strftime("%Y-%m-%d %H:%M"),
-                        "Ticker": selected_ticker,
-                        "Current Price": current_price,
-                        "Predicted Price": predicted_price,
-                        "Predicted Change": pred_change_pct,
-                        "Confidence": confidence,
-                        "Signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD"
+                        "timestamp": prediction_time.strftime("%Y-%m-%d %H:%M"),
+                        "ticker": selected_ticker,
+                        "current_price": current_price,
+                        "predicted_price": predicted_price,
+                        "predicted_change": pred_change_pct,
+                        "confidence": confidence,
+                        "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD"
                     }
                     st.session_state.prediction_log.append(log_entry)
+                    
+                    # Show update reminder
+                    st.info("Prediction logged. Use the 'Update Prediction Results' button in the sidebar to check actual results after market hours.")
         
         # Display prediction log
         if st.session_state.prediction_log:
             st.markdown("## Prediction History")
-            log_df = pd.DataFrame(st.session_state.prediction_log)
-            st.dataframe(log_df, use_container_width=True)
             
-            # Calculate accuracy if we had actual future prices
-            # This is a placeholder - in a real app you would compare with actual future prices
-            st.markdown("### Performance Summary")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Predictions", len(st.session_state.prediction_log))
-            with col2:
-                # Use backtest accuracy estimate
-                st.metric("Estimated Accuracy", "62.3%")
-            with col3:
-                # Use backtest return
-                st.metric("Estimated Return", f"+{BACKTEST_METRICS['total_pnl_pct']:.2f}%")
+            # Convert to DataFrame for display
+            log_df = pd.DataFrame(st.session_state.prediction_log)
+            
+            # Add result columns if available
+            if 'correct' in log_df.columns:
+                # Calculate accuracy metrics
+                accuracy = st.session_state.performance_metrics['accuracy']
+                total_return = st.session_state.performance_metrics['total_return']
+                avg_return = st.session_state.performance_metrics['avg_return']
+                
+                # Display performance metrics
+                st.markdown("### Real-Time Performance")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Predictions", st.session_state.performance_metrics['total_predictions'])
+                with col2:
+                    st.metric("Accuracy", f"{accuracy:.1f}%")
+                with col3:
+                    st.metric("Total Return", f"{total_return:.2f}%")
+                with col4:
+                    st.metric("Avg Return", f"{avg_return:.2f}%")
+            
+            st.dataframe(log_df, use_container_width=True)
     
     # Model explanation section
     st.markdown("---")
@@ -418,15 +495,16 @@ if models_loaded:
         - **Update Frequency**: Predictions are generated in real-time
         """)
         
-        st.markdown("### Backtest Performance")
-        st.markdown(f"""
+        # Backtest performance (from your actual results)
+        st.markdown("### Historical Backtest Performance")
+        st.markdown("""
         Based on extensive backtesting, the model has achieved:
         
-        - **Total Return**: {BACKTEST_METRICS['total_pnl_pct']:.2f}%
-        - **Start Capital**: ${BACKTEST_METRICS['start_capital']:,.2f}
-        - **Final Capital**: ${BACKTEST_METRICS['final_capital']:,.2f}
-        - **Total Trades**: {BACKTEST_METRICS['total_trades']:,}
-        - **Avg Hourly PnL**: ${BACKTEST_METRICS['avg_hourly_pnl']:.4f} ± ${BACKTEST_METRICS['hourly_pnl_std']:.4f}
+        - **Total Return**: 239.97%
+        - **Start Capital**: $10,000.00
+        - **Final Capital**: $33,997.15
+        - **Total Trades**: 8,944
+        - **Avg Hourly PnL**: $2.68 ± $91.17
         """)
         
         # Disclaimer
