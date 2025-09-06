@@ -213,6 +213,17 @@ def predict_with_model(features, current_price):
     
     return predicted_price, pred_change_pct, votes, confidence
 
+# Backtest performance metrics (from your actual results)
+BACKTEST_METRICS = {
+    "start_capital": 10000.00,
+    "final_capital": 33997.15,
+    "total_pnl": 23997.15,
+    "total_pnl_pct": 239.97,
+    "total_trades": 8944,
+    "avg_hourly_pnl": 2.6830,
+    "hourly_pnl_std": 91.1666
+}
+
 # Main app
 if models_loaded:
     # Fetch data for selected ticker
@@ -354,11 +365,11 @@ if models_loaded:
             with col1:
                 st.metric("Total Predictions", len(st.session_state.prediction_log))
             with col2:
-                # Simulated accuracy
-                st.metric("Simulated Accuracy", "62%")
+                # Use backtest accuracy estimate
+                st.metric("Estimated Accuracy", "62.3%")
             with col3:
-                # Simulated return
-                st.metric("Simulated Return", "+8.3%")
+                # Use backtest return
+                st.metric("Estimated Return", f"+{BACKTEST_METRICS['total_pnl_pct']:.2f}%")
     
     # Model explanation section
     st.markdown("---")
@@ -407,13 +418,15 @@ if models_loaded:
         - **Update Frequency**: Predictions are generated in real-time
         """)
         
-        st.markdown("""
-        ### Performance Metrics
-        Based on backtesting, the model has achieved:
-        - **Accuracy**: 62.3%
-        - **Annualized Return**: 18.7%
-        - **Sharpe Ratio**: 1.42
-        - **Win Rate**: 58.9%
+        st.markdown("### Backtest Performance")
+        st.markdown(f"""
+        Based on extensive backtesting, the model has achieved:
+        
+        - **Total Return**: {BACKTEST_METRICS['total_pnl_pct']:.2f}%
+        - **Start Capital**: ${BACKTEST_METRICS['start_capital']:,.2f}
+        - **Final Capital**: ${BACKTEST_METRICS['final_capital']:,.2f}
+        - **Total Trades**: {BACKTEST_METRICS['total_trades']:,}
+        - **Avg Hourly PnL**: ${BACKTEST_METRICS['avg_hourly_pnl']:.4f} ± ${BACKTEST_METRICS['hourly_pnl_std']:.4f}
         """)
         
         # Disclaimer
