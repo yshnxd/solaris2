@@ -5,8 +5,6 @@ import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import joblib
-import torch
-import torch.nn as nn
 from datetime import datetime, timedelta
 import ta
 from sklearn.preprocessing import StandardScaler
