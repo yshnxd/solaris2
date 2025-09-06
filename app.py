@@ -1,631 +1,374 @@
-# SOLARIS — Stock Price Movement Predictor (adapted for the notebook pipeline)
-# - Updated to match the notebook's feature/sequence shape and meta-learner usage
-# - Loads CNN/LSTM (keras or joblib), XGB (sklearn/xgboost) and a regression meta-learner
-# - Builds features close to the notebook (lag returns, rolling vol, RSI, MACD, SMA/EMA)
-# - Scales features with a saved scaler (scaler.pkl) if provided
-# - Creates sequences for CNN/LSTM and aligns tabular rows for XGB/meta
-# - Produces regression prediction (next-hour return) and maps to Buy/Hold/Sell using user threshold
-# - Persists predictions to a CSV history with dedupe (by ticker/interval/target_time)
-import os
-import tempfile
-import warnings
-warnings.filterwarnings("ignore")
-
 import streamlit as st
-import numpy as np
-import pandas as pd
-import joblib
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-import plotly.graph_objects as go
 import yfinance as yf
-import ta
+import pandas as pd
+import numpy as np
+import joblib
+import datetime
+import plotly.graph_objects as go
+import os
 
-from datetime import datetime, timedelta
-try:
-    from zoneinfo import ZoneInfo     # Python 3.9+
-except Exception:
-    from pytz import timezone as ZoneInfo
+# --- Streamlit page config ---
+st.set_page_config(
+    page_title="SOLARIS : A Machine Learning Based Hourly Stock Prediction Tool",
+    page_icon=":sun_with_face:",
+    layout="wide",
+)
 
-import random, tensorflow as tf
-from pathlib import Path
+# --- Constants ---
+START_CAPITAL = 10000
+MODEL_DIR = '.'  # Change if models are in a different folder
 
-SEED = 42
-np.random.seed(SEED)
-random.seed(SEED)
-tf.random.set_seed(SEED)
+# --- Load Models & Scaler ---
+@st.cache_data(show_spinner=False)
+def load_models():
+    cnn_model = joblib.load(os.path.join(MODEL_DIR, "cnn_model.pkl"))
+    lstm_model = joblib.load(os.path.join(MODEL_DIR, "lstm_model.pkl"))
+    xgb_model = joblib.load(os.path.join(MODEL_DIR, "xgb_model.pkl"))
+    meta_model = joblib.load(os.path.join(MODEL_DIR, "meta_learner.pkl"))
+    scaler = joblib.load(os.path.join(MODEL_DIR, "scaler.pkl"))
+    return cnn_model, lstm_model, xgb_model, meta_model, scaler
 
-# -------------------------------------------------------------------
-# Persisted history utilities (session_state-backed, atomic writes)
-# -------------------------------------------------------------------
-def get_history_file():
-    return st.session_state.get('history_file', st.sidebar.text_input("History CSV file", "predictions_history.csv"))
+cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 
-history_file = get_history_file()
+# --- Utility: Feature Engineering for Live Data ---
+def make_features(df, aligned_close=None, ticker=None):
+    # df: dataframe with columns Open, High, Low, Close, Volume
+    # aligned_close: dataframe of aligned closes for cross-asset features
+    # ticker: str
 
-def load_history():
-    if "history" not in st.session_state:
-        if os.path.exists(history_file):
-            df = pd.read_csv(history_file)
-            for c in ["predicted_at","fetched_last_ts","target_time","checked_at"]:
-                if c in df.columns:
-                    df[c] = pd.to_datetime(df[c], errors='coerce')
-            st.session_state["history"] = df
-        else:
-            st.session_state["history"] = pd.DataFrame()
-    return st.session_state["history"]
+    feat = pd.DataFrame(index=df.index)
+    price_series = df['Close']
 
-def save_history_atomic(df: pd.DataFrame, target_path: str):
-    try:
-        p = Path(target_path)
-        if p.parent:
-            p.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("w", delete=False, dir=str(p.parent), suffix=".csv") as tmp:
-            df.to_csv(tmp.name, index=False)
-            tmp_name = tmp.name
-        os.replace(tmp_name, str(p))
-    except Exception as e:
-        st.warning(f"Failed to save history atomically to {target_path}: {e}")
-        try:
-            df.to_csv(target_path, index=False)
-        except Exception as e2:
-            st.warning(f"Fallback save also failed: {e2}")
-    st.session_state["history"] = df
+    # Lag returns
+    for lag in [1, 3, 6, 12, 24]:
+        feat[f"ret_{lag}h"] = price_series.pct_change(lag)
 
-def append_prediction_with_dedup(history, new_row):
-    import pandas as pd
-    if history is None or (hasattr(history,'empty') and history.empty):
-        out = pd.DataFrame([new_row])
-    else:
-        if 'ticker' not in history.columns:
-            history['ticker'] = pd.NA
-        if 'interval' not in history.columns:
-            history['interval'] = pd.NA
-        if 'target_time' not in history.columns:
-            history['target_time'] = pd.NA
-        def _norm_ts(x):
-            try:
-                return str(ensure_timestamp_in_manila(x))
-            except Exception:
-                return str(pd.to_datetime(x, errors='coerce'))
-        new_tgt_norm = _norm_ts(new_row.get('target_time'))
-        hist_ticker = history['ticker'].astype(str).str.upper()
-        hist_interval = history['interval'].astype(str)
-        hist_target_norm = history['target_time'].apply(lambda x: _norm_ts(x) if pd.notna(x) else "")
-        new_key = (str(new_row.get('ticker','')).upper(), str(new_row.get('interval','')), str(new_tgt_norm))
-        mask_same = (hist_ticker == new_key[0]) & (hist_interval == new_key[1]) & (hist_target_norm == new_key[2])
-        if mask_same.any():
-            history = history.loc[~mask_same].reset_index(drop=True)
-        missing_cols = set(new_row.keys()) - set(history.columns)
-        for mc in missing_cols:
-            history[mc] = pd.NA
-        out = pd.concat([history, pd.DataFrame([new_row])], ignore_index=True, sort=False)
-        # Deduplicate: keep latest prediction per (ticker, interval, target_time)
-        dedup_cols = ['ticker','interval','target_time']
-        if 'predicted_at' in out.columns:
-            out = out.sort_values('predicted_at', ascending=False).drop_duplicates(subset=dedup_cols, keep='first')
-        else:
-            out = out.drop_duplicates(subset=dedup_cols, keep='last')
-    return out
+    # Rolling volatility
+    for window in [6, 12, 24]:
+        feat[f"vol_{window}h"] = price_series.pct_change().rolling(window).std()
 
-# -------------------------------------------------------------------
-# Page & Sidebar UI
-# -------------------------------------------------------------------
-st.set_page_config(page_title="Solaris - Predict Next Hour!", layout="wide")
-st.title("SOLARIS — Stock Price Movement Predictor")
-st.markdown("_Adapted to your notebook pipeline: regression meta-learner + CNN/LSTM/XGB ensembler_")
+    # RSI (simple)
+    delta = price_series.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up = up.rolling(14).mean()
+    roll_down = down.rolling(14).mean()
+    rs = roll_up / roll_down
+    feat["rsi_14"] = 100 - (100 / (1 + rs))
 
-# ------------------------------
-# Sidebar
-# ------------------------------
-st.sidebar.header("Settings")
-ticker = st.sidebar.text_input("Ticker (Yahoo symbol)", "AAPL").strip().upper()
+    # MACD (simple)
+    ema12 = price_series.ewm(span=12, adjust=False).mean()
+    ema26 = price_series.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    feat["macd"] = macd
+    feat["macd_signal"] = signal
 
-sequence_length = st.sidebar.number_input("Sequence length (for CNN/LSTM)", min_value=3, max_value=512, value=128, step=1)
-interval = st.sidebar.selectbox("Interval", ["60m"], index=0)
-period_default = "90d" if interval == "60m" else "90d"
-period = st.sidebar.text_input("Period (try 90d, 365d, or 729d)", period_default)
-
-st.sidebar.markdown("---")
-st.sidebar.write("Model files (relative to app.py):")
-cnn_path   = st.sidebar.text_input("CNN (.h5/.pkl)", "cnn_model.pkl")
-lstm_path  = st.sidebar.text_input("LSTM (.h5/.pkl)", "lstm_model.pkl")
-xgb_path   = st.sidebar.text_input("XGB (.pkl)", "xgb_model.pkl")
-meta_path  = st.sidebar.text_input("Meta (.pkl)", "meta_learner.pkl")
-scaler_path = st.sidebar.text_input("Scaler (.pkl) (StandardScaler)", "scaler.pkl")
-
-st.sidebar.markdown("---")
-st.sidebar.write("Label mapping / thresholds")
-label_map_input = st.sidebar.text_input("Labels (index order)", "down,neutral,up")
-label_map = [s.strip().lower() for s in label_map_input.split(",")]
-# Threshold for mapping a regression return to buy/sell/hold (absolute return)
-return_threshold = st.sidebar.number_input("Return threshold (absolute, e.g. 0.001 = 0.1%)", value=0.001, format="%.6f")
-prob_threshold = st.sidebar.slider("Conf threshold (unused for regression mapping)", 0.05, 0.95, 0.5, 0.05)
-
-models_to_run = st.sidebar.multiselect("Models to run", ["cnn", "lstm", "xgb", "meta"], default=["cnn", "lstm", "xgb", "meta"])
-run_button = st.sidebar.button("Fetch live data & predict NEXT interval (real-time)")
-
-COLOR_BUY_BG = "#d7e9da"   # soft green
-COLOR_SELL_BG = "#f0e5e6"  # soft rose
-COLOR_HOLD_BG = "#f3f4f6"  # soft gray
-COLOR_TEXT = "#111111"
-
-# -------------------------------------------------------------------
-# Helpers: model loading / caching / pricing / time handling / features
-# -------------------------------------------------------------------
-def warn(msg):
-    try:
-        st.warning(msg)
-    except Exception:
-        print("WARNING:", msg)
-
-@st.cache_resource(show_spinner=False)
-def load_model_safe(path: str):
-    if not path or not os.path.exists(path):
-        warn(f"Model file not found: {path}")
-        return None
-    try:
-        mod = joblib.load(path)
-        return mod
-    except Exception as e_joblib:
-        try:
-            from tensorflow.keras.models import load_model as keras_load_model
-            try:
-                mod = keras_load_model(path)
-                return mod
-            except Exception as e_keras:
-                warn(f"keras loader failed for {path}: {e_keras} (joblib error: {e_joblib})")
-                return None
-        except Exception:
-            warn(f"Model load failed for {path}: {e_joblib}")
-            return None
-
-@st.cache_data(ttl=30, show_spinner=False)
-def download_price_cached(ticker: str, interval: str, period: str = None, start=None, end=None, use_tk_history=False):
-    try:
-        if use_tk_history:
-            tk = yf.Ticker(ticker)
-            df = tk.history(period=period, interval=interval, start=start, end=end, auto_adjust=False, prepost=False, actions=False)
-        else:
-            if start is not None or end is not None:
-                df = yf.download(ticker, start=start, end=end, interval=interval, progress=False)
-            else:
-                df = yf.download(ticker, interval=interval, period=period, progress=False)
-        if df is None:
-            return pd.DataFrame()
-        df = df.dropna(how='all')
-        try:
-            df.index = pd.to_datetime(df.index)
-        except Exception:
-            pass
-        return df
-    except Exception as e:
-        warn(f"yf download failed for {ticker} ({interval}): {e}")
-        return pd.DataFrame()
-
-def ensure_timestamp_in_manila(ts):
-    try:
-        tz = ZoneInfo("Asia/Manila")
-    except Exception:
-        from pytz import timezone
-        tz = timezone("Asia/Manila")
-
-    ts = pd.to_datetime(ts, errors='coerce')
-    if pd.isna(ts):
-        return pd.Timestamp.now(tz=tz)
-    if getattr(ts, "tzinfo", None) is None:
-        try:
-            ts = ts.tz_localize("UTC", ambiguous='infer').tz_convert(tz)
-        except Exception:
-            try:
-                ts = ts.tz_localize(tz, ambiguous='infer')
-            except Exception:
-                pass
-    else:
-        try:
-            ts = ts.tz_convert(tz)
-        except Exception:
-            pass
-    return ts
-
-def compute_real_next_time_now(interval):
-    try:
-        tz = ZoneInfo("Asia/Manila")
-    except Exception:
-        from pytz import timezone
-        tz = timezone("Asia/Manila")
-    now = datetime.now(tz)
-    if isinstance(interval, str) and interval.endswith("m"):
-        try:
-            mins = int(interval[:-1])
-            minute = now.minute
-            remainder = minute % mins
-            if remainder == 0 and now.second == 0 and now.microsecond == 0:
-                next_ts = now
-            else:
-                delta_min = mins - remainder
-                next_ts = (now.replace(second=0, microsecond=0) + timedelta(minutes=delta_min))
-            return pd.Timestamp(next_ts).tz_localize(tz) if getattr(pd.Timestamp(next_ts), "tzinfo", None) is None else pd.Timestamp(next_ts).tz_convert(tz)
-        except Exception:
-            return pd.Timestamp(now).tz_localize(tz)
-    if interval == "1d":
-        next_day = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
-        return pd.Timestamp(next_day).tz_localize(tz)
-    next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-    return pd.Timestamp(next_hour).tz_localize(tz)
-
-def interval_to_timedelta(interval):
-    if isinstance(interval, str):
-        iv = interval.strip().lower()
-        if iv.endswith('m'):
-            try:
-                mins = int(iv[:-1])
-                return timedelta(minutes=mins)
-            except Exception:
-                return timedelta(hours=1)
-        if iv.endswith('h'):
-            try:
-                hrs = int(iv[:-1])
-                return timedelta(hours=hrs)
-            except Exception:
-                return timedelta(hours=1)
-        if iv.endswith('d'):
-            try:
-                days = int(iv[:-1])
-                return timedelta(days=days)
-            except Exception:
-                return timedelta(days=1)
-    return timedelta(hours=1)
-
-# Feature engineering similar to the notebook (single-ticker simplified version)
-def create_features_from_price_df(df: pd.DataFrame):
-    # df expected to have columns: Open High Low Close Volume
-    X = pd.DataFrame(index=df.index)
-    price = df['Close']
-    X['ret_1h'] = price.pct_change(1)
-    X['ret_3h'] = price.pct_change(3)
-    X['ret_6h'] = price.pct_change(6)
-    X['ret_12h'] = price.pct_change(12)
-    X['ret_24h'] = price.pct_change(24)
-    for w in [6, 12, 24]:
-        X[f'vol_{w}h'] = price.pct_change().rolling(w).std()
-    # RSI 14
-    try:
-        X['rsi_14'] = ta.momentum.RSIIndicator(price, window=14).rsi()
-    except Exception:
-        X['rsi_14'] = np.nan
-    # MACD
-    try:
-        macd = ta.trend.MACD(price)
-        X['macd'] = macd.macd()
-        X['macd_signal'] = macd.macd_signal()
-    except Exception:
-        X['macd'] = np.nan
-        X['macd_signal'] = np.nan
     # Moving averages
     for w in [5, 10, 20]:
-        X[f'sma_{w}'] = price.rolling(w).mean()
-        X[f'ema_{w}'] = price.ewm(span=w, adjust=False).mean()
-    # Volume based
-    if 'Volume' in df.columns:
-        vol = df['Volume'].ffill()
-        X['vol_change_1h'] = vol.pct_change()
-        X['vol_ma_24h'] = vol.rolling(24).mean()
-        X['vol'] = vol
-    # calendar
-    X['hour'] = X.index.hour
-    X['day_of_week'] = X.index.dayofweek
-    return X
+        feat[f"sma_{w}"] = price_series.rolling(w).mean()
+        feat[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
 
-def create_sequences(X_arr: np.ndarray, seq_len=128):
+    # Volume
+    if "Volume" in df.columns:
+        vol_series = df["Volume"]
+        feat["vol_change_1h"] = vol_series.pct_change()
+        feat["vol_ma_24h"] = vol_series.rolling(24).mean()
+
+    # Calendar features
+    feat["hour"] = feat.index.hour
+    feat["day_of_week"] = feat.index.dayofweek
+
+    # Cross-asset returns (if aligned_close given)
+    asset_list = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
+    if aligned_close is not None:
+        for asset in asset_list:
+            if asset in aligned_close.columns:
+                asset_series = aligned_close[asset].reindex(feat.index).ffill()
+                feat[f"{asset}_ret_1h"] = asset_series.pct_change()
+
+    feat["datetime"] = feat.index
+    feat["ticker"] = ticker
+    feat = feat.dropna().tail(1)  # Use the latest row
+
+    return feat
+
+# --- Utility: Get Yahoo Finance Data ---
+@st.cache_data(show_spinner=True)
+def get_yf_data(ticker, ndays):
+    interval = "60m"
+    period = f"{ndays}d"
+    df = yf.download(ticker, interval=interval, period=period)
+    df = df.dropna()
+    df.index = pd.to_datetime(df.index)
+    return df
+
+# --- Utility: Prediction Pipeline ---
+def predict_next_hour(ticker, aligned_close=None):
+    # 1. Get last 128 hours for sequence models, last row for tabular
+    df = get_yf_data(ticker, ndays=6)  # 5+ days for 128 hours
+    if len(df) < 128:
+        return None, "Not enough hourly data for prediction.", None
+
+    features = make_features(df, aligned_close=aligned_close, ticker=ticker)
+    if features.shape[0] == 0:
+        return None, "Not enough valid features for prediction.", None
+
+    # Prepare inputs for models
+    X_tab = features.drop(columns=['datetime', 'ticker']).values
+    X_tab_scaled = scaler.transform(X_tab)
     X_seq = []
-    for i in range(len(X_arr) - seq_len + 1):
-        X_seq.append(X_arr[i:i+seq_len])
-    return np.array(X_seq)
+    seq_df = df.tail(128)
+    seq_features = make_features(seq_df, aligned_close=aligned_close, ticker=ticker)
+    for i in range(128):
+        # For live, we can just use tabular features of last 128 hours
+        seq_feat = make_features(df.iloc[:-(128-i)], aligned_close=aligned_close, ticker=ticker)
+        if seq_feat.shape[0] == 0:
+            continue
+        X_seq.append(seq_feat.drop(columns=['datetime', 'ticker']).values[0])
+    if len(X_seq) < 128:
+        # fallback: repeat last valid row
+        X_seq = [X_tab_scaled[0]] * 128
+    X_seq = np.array(X_seq).reshape(1, 128, X_tab_scaled.shape[1])
 
-def align_tabular_row_to_names(last_row_df, expected_names):
-    out = pd.DataFrame(index=[0])
-    for nm in expected_names:
-        out[nm] = last_row_df.iloc[0][nm] if nm in last_row_df.columns else 0.0
-    return out
+    # Model predictions
+    pred_cnn = cnn_model.predict(X_seq, verbose=0)[0][0]
+    pred_lstm = lstm_model.predict(X_seq, verbose=0)[0][0]
+    pred_xgb = xgb_model.predict(X_tab_scaled)[0]
+    meta_X = np.array([[pred_cnn, pred_lstm, pred_xgb,
+                        np.mean([pred_cnn, pred_lstm, pred_xgb]),
+                        np.std([pred_cnn, pred_lstm, pred_xgb]),
+                        np.max([pred_cnn, pred_lstm, pred_xgb]),
+                        np.min([pred_cnn, pred_lstm, pred_xgb])]])
+    pred_meta = meta_model.predict(meta_X)[0]
 
-def align_seq_df_to_names(seq_df, expected_names):
-    X = seq_df.copy()
-    for nm in expected_names:
-        if nm not in X.columns:
-            X[nm] = 0.0
-    extra = [c for c in X.columns if c not in expected_names]
-    if extra:
-        X = X.drop(columns=extra)
-    return X[expected_names]
+    # Current price
+    current_price = df.iloc[-1]['Close']
+    predicted_price = current_price * (1 + pred_meta)
+    pct_change = pred_meta * 100
+    direction = "UP" if pred_meta > 0 else "DOWN" if pred_meta < 0 else "HOLD"
 
-def map_return_to_label(ret: float, threshold: float):
-    if ret is None or np.isnan(ret):
-        return "neutral"
-    if ret > threshold:
-        return "up"
-    if ret < -threshold:
-        return "down"
-    return "neutral"
+    # Model confidence (simulate with inverse std of base models)
+    confidence = max(0, min(100, 100 - np.std([pred_cnn, pred_lstm, pred_xgb]) * 9000))
 
-def map_label_to_suggestion(label):
-    l = (label or "").strip().lower()
-    if l == "up":
-        return "Buy"
-    if l == "down":
-        return "Sell"
-    return "Hold"
+    # Ensemble votes
+    votes = {
+        "CNN": "UP" if pred_cnn > 0 else "DOWN" if pred_cnn < 0 else "HOLD",
+        "LSTM": "UP" if pred_lstm > 0 else "DOWN" if pred_lstm < 0 else "HOLD",
+        "XGBoost": "UP" if pred_xgb > 0 else "DOWN" if pred_xgb < 0 else "HOLD"
+    }
 
-# -------------------------------------------------------------------
-# Load models / scaler (cached)
-# -------------------------------------------------------------------
-cnn_model = load_model_safe(cnn_path) if "cnn" in models_to_run else None
-lstm_model = load_model_safe(lstm_path) if "lstm" in models_to_run else None
-xgb_model = load_model_safe(xgb_path) if "xgb" in models_to_run else None
-meta_model = load_model_safe(meta_path) if "meta" in models_to_run else None
+    return {
+        "predicted_price": predicted_price,
+        "current_price": current_price,
+        "pred_meta": pred_meta,
+        "pct_change": pct_change,
+        "direction": direction,
+        "confidence": confidence,
+        "votes": votes,
+        "pred_cnn": pred_cnn,
+        "pred_lstm": pred_lstm,
+        "pred_xgb": pred_xgb
+    }, None, df
 
-scaler = None
-if scaler_path and os.path.exists(scaler_path):
-    try:
-        scaler = joblib.load(scaler_path)
-    except Exception:
-        try:
-            scaler = joblib.load(scaler_path)
-        except Exception as e:
-            warn(f"Failed to load scaler: {e}")
-            scaler = None
+# --- Virtual Trading Log (in-memory, could use st.session_state or persistent file/db) ---
+if "trade_log" not in st.session_state:
+    st.session_state.trade_log = []
 
-# -------------------------------------------------------------------
-# Main action: fetch data, build features, make predictions, persist
-# -------------------------------------------------------------------
-st.sidebar.markdown("---")
-st.sidebar.write("History & persistence")
-if st.sidebar.button("Reload history"):
-    st.session_state.pop("history", None)
-history_df = load_history()
+def add_trade_log_entry(entry):
+    st.session_state.trade_log.append(entry)
 
-if run_button:
-    with st.spinner("Downloading data and preparing features..."):
-        price_df = download_price_cached(ticker, interval, period)
-        if price_df.empty:
-            st.error("No price data downloaded. Check ticker/interval/period or network.")
-        else:
-            st.success(f"Downloaded {len(price_df)} rows for {ticker} ({interval})")
+def get_trade_log_df():
+    return pd.DataFrame(st.session_state.trade_log)
 
-            # Create features
-            feat_df = create_features_from_price_df(price_df)
-            feat_df = feat_df.dropna()
-            if feat_df.empty:
-                st.error("No features (all NaN) after feature engineering.")
-            else:
-                # Determine required feature names from models if possible
-                # Prefer meta learner alpha: expects 7 features [cnn_pred, lstm_pred, xgb_pred, mean,std,max,min]
-                # For base models, determine expected tabular features for XGB (if possible)
-                xgb_expected = None
-                if xgb_model is not None:
-                    # try to infer n features or feature names
-                    fn = getattr(xgb_model, "feature_names_in_", None)
-                    if fn is not None:
-                        xgb_expected = list(fn)
-                # If scaler exists, we will scale the tabular X columns that were used in training.
-                # We'll try to align scaler.feature_names_in_ if available
-                scaler_expected = None
-                if scaler is not None:
-                    scaler_expected = getattr(scaler, "feature_names_in_", None)
-                    if scaler_expected is not None:
-                        scaler_expected = list(scaler_expected)
-                # Build tabular matrix (last N rows) and sequence matrix (for seq_len)
-                seq_len = int(sequence_length)
-                # Select last rows enough for sequence
-                if len(feat_df) < seq_len:
-                    st.error(f"Not enough rows to create one sequence (need {seq_len}, got {len(feat_df)})")
-                else:
-                    last_feat_df = feat_df.copy().iloc[-(seq_len+1):]  # +1 to align label/time
-                    # align features order to scaler or xgb if provided; otherwise use current columns
-                    base_feature_names = list(feat_df.columns)
-                    if scaler_expected:
-                        # take only names present in feat_df & scaler_expected (preserve scaler order)
-                        common = [n for n in scaler_expected if n in feat_df.columns]
-                        if len(common) >= 1:
-                            base_feature_names = common
-                    elif xgb_expected:
-                        common = [n for n in xgb_expected if n in feat_df.columns]
-                        if len(common) >= 1:
-                            base_feature_names = common
+# --- App Layout ---
+st.title("SOLARIS : A Machine Learning Based Hourly Stock Prediction Tool")
+st.subheader("A ML Model combining Convolutional Neural Networks (CNN), Long Short-Term Memory (LSTM) networks, and XGBoost with a Meta Learner Ensemble for Short Term Stock Market Prediction")
 
-                    tab_X_last = last_feat_df[base_feature_names].iloc[-1:].fillna(0.0)
-                    # scale tabular
-                    tab_X_scaled = tab_X_last.copy()
-                    if scaler is not None:
-                        try:
-                            # If scaler was fitted to a full array (no feature_names), call transform directly
-                            if scaler_expected is None:
-                                arr = last_feat_df[base_feature_names].iloc[-1:].to_numpy().astype(float)
-                                arr_s = scaler.transform(arr)
-                                tab_X_scaled = pd.DataFrame(arr_s, columns=base_feature_names)
-                            else:
-                                # Ensure ordering
-                                arr = last_feat_df[scaler_expected].iloc[-1:].to_numpy().astype(float)
-                                arr_s = scaler.transform(arr)
-                                tab_X_scaled = pd.DataFrame(arr_s, columns=scaler_expected)
-                                base_feature_names = scaler_expected
-                        except Exception as e:
-                            warn(f"Scaler transform failed: {e}")
-                            tab_X_scaled = tab_X_last.fillna(0.0)
-
-                    # Prepare sequence array for CNN/LSTM: need seq_len x n_features
-                    seq_df_for_model = last_feat_df.iloc[-seq_len:][base_feature_names].fillna(0.0)
-                    X_seq_arr = seq_df_for_model.to_numpy(dtype=float)
-                    # if sequence model expects scaled features, use same scaler transform
-                    if scaler is not None:
-                        try:
-                            if scaler_expected is None:
-                                X_seq_arr = scaler.transform(seq_df_for_model.values)
-                            else:
-                                # reorder features for scaler_expected if necessary
-                                seq_df_for_model2 = seq_df_for_model.copy()
-                                missing = [c for c in scaler_expected if c not in seq_df_for_model2.columns]
-                                for m in missing:
-                                    seq_df_for_model2[m] = 0.0
-                                seq_df_for_model2 = seq_df_for_model2[scaler_expected]
-                                X_seq_arr = scaler.transform(seq_df_for_model2.values)
-                                base_feature_names = scaler_expected
-                        except Exception as e:
-                            warn(f"Scaler transform for sequence failed: {e}")
-
-                    # reshape for model predict: (1, seq_len, n_features)
-                    X_seq_input = X_seq_arr.reshape(1, X_seq_arr.shape[0], X_seq_arr.shape[1])
-
-                    # Predictions: CNN/LSTM/XGB (regression outputs)
-                    preds = {}
-                    # CNN
-                    if cnn_model is not None and "cnn" in models_to_run:
-                        try:
-                            p = cnn_model.predict(X_seq_input, verbose=0)
-                            # handle shape (1,1) or (1,) etc.
-                            pval = float(np.asarray(p).reshape(-1)[0])
-                        except Exception as e:
-                            warn(f"CNN predict failed: {e}")
-                            pval = np.nan
-                        preds['cnn'] = pval
-                    # LSTM
-                    if lstm_model is not None and "lstm" in models_to_run:
-                        try:
-                            p = lstm_model.predict(X_seq_input, verbose=0)
-                            pval = float(np.asarray(p).reshape(-1)[0])
-                        except Exception as e:
-                            warn(f"LSTM predict failed: {e}")
-                            pval = np.nan
-                        preds['lstm'] = pval
-                    # XGB
-                    if xgb_model is not None and "xgb" in models_to_run:
-                        try:
-                            # xgb expects 2D array with same columns used in training
-                            arr_tab = tab_X_scaled.to_numpy(dtype=float)
-                            p = xgb_model.predict(arr_tab)
-                            pval = float(np.asarray(p).reshape(-1)[0])
-                        except Exception as e:
-                            warn(f"XGB predict failed: {e}")
-                            pval = np.nan
-                        preds['xgb'] = pval
-
-                    # Meta
-                    if meta_model is not None and "meta" in models_to_run:
-                        try:
-                            # Build meta features: [cnn_pred, lstm_pred, xgb_pred, mean,std,max,min]
-                            base_preds = []
-                            for k in ['cnn','lstm','xgb']:
-                                base_preds.append(preds.get(k, np.nan))
-                            arr = np.array(base_preds, dtype=float)
-                            mean_pred = np.nanmean(arr)
-                            std_pred = np.nanstd(arr)
-                            max_pred = np.nanmax(arr)
-                            min_pred = np.nanmin(arr)
-                            meta_X = np.array([[arr[0], arr[1], arr[2], mean_pred, std_pred, max_pred, min_pred]])
-                            pmeta = meta_model.predict(meta_X)
-                            pmeta_val = float(np.asarray(pmeta).reshape(-1)[0])
-                        except Exception as e:
-                            warn(f"Meta predict failed: {e}")
-                            pmeta_val = np.nan
-                        preds['meta'] = pmeta_val
-
-                    # Build display
-                    st.subheader(f"Predictions for {ticker} (next {interval})")
-                    now_ts = datetime.utcnow().isoformat() + "Z"
-                    next_ts = compute_real_next_time_now(interval)
-                    st.write("Target prediction time (Asia/Manila):", next_ts)
-
-                    # Compose result row
-                    result = {
-                        "ticker": ticker,
-                        "interval": interval,
-                        "predicted_at": pd.Timestamp.now(tz=ZoneInfo("Asia/Manila")),
-                        "fetched_last_ts": price_df.index[-1] if len(price_df)>0 else pd.NaT,
-                        "target_time": next_ts,
-                        "price": float(price_df['Close'].iloc[-1]) if len(price_df)>0 else np.nan,
-                        "pred_cnn": preds.get('cnn', np.nan),
-                        "pred_lstm": preds.get('lstm', np.nan),
-                        "pred_xgb": preds.get('xgb', np.nan),
-                        "pred_meta": preds.get('meta', np.nan)
-                    }
-
-                    # Map pred_meta to label and suggestion
-                    meta_return = result.get('pred_meta', np.nan)
-                    label = map_return_to_label(meta_return, return_threshold) if not np.isnan(meta_return) else "neutral"
-                    suggestion = map_label_to_suggestion(label)
-                    result['label_meta'] = label
-                    result['suggestion_meta'] = suggestion
-
-                    # Display summary
-                    cols = st.columns(4)
-                    cols[0].metric("Last Close", f"{result['price']:.2f}")
-                    cols[1].metric("CNN (ret)", f"{result['pred_cnn']:.6f}")
-                    cols[2].metric("LSTM (ret)", f"{result['pred_lstm']:.6f}")
-                    cols[3].metric("XGB (ret)", f"{result['pred_xgb']:.6f}")
-                    st.info(f"Meta prediction (regression return): {result['pred_meta']:.6f}  -> Label: {label.upper()}  Suggestion: {suggestion}")
-
-                    # Append to history and save
-                    hist = load_history()
-                    new_hist = append_prediction_with_dedup(hist, result)
-                    try:
-                        save_history_atomic(new_hist, history_file)
-                        st.success(f"Saved prediction to history ({history_file})")
-                    except Exception as e:
-                        st.warning(f"Could not save history file: {e}")
-
-                    # Show last N history for this ticker
-                    st.subheader("Recent predictions (history)")
-                    display_hist = new_hist.copy()
-                    if 'predicted_at' in display_hist.columns:
-                        display_hist = display_hist.sort_values('predicted_at', ascending=False)
-                    st.dataframe(display_hist.head(25))
-
-# -------------------------------------------------------------------
-# Show available models & basic diagnostics
-# -------------------------------------------------------------------
-st.sidebar.markdown("---")
-st.sidebar.write("Loaded models (status)")
-def model_status_str(m):
-    if m is None:
-        return "NOT LOADED"
-    try:
-        # attempt to print type and shape info
-        name = type(m).__name__
-        nfeat = getattr(m, "n_features_in_", None)
-        if nfeat is not None:
-            return f"{name} (n_features={nfeat})"
-        if hasattr(m, "input_shape"):
-            return f"{name} (input_shape={m.input_shape})"
-        return f"{name}"
-    except Exception:
-        return str(type(m))
-
-st.sidebar.write("CNN: " + model_status_str(cnn_model))
-st.sidebar.write("LSTM: " + model_status_str(lstm_model))
-st.sidebar.write("XGB: " + model_status_str(xgb_model))
-st.sidebar.write("Meta: " + model_status_str(meta_model))
-st.sidebar.write("Scaler: " + (str(type(scaler).__name__) if scaler is not None else "NOT LOADED"))
-
-# -------------------------------------------------------------------
-# Show full history viewer + export
-# -------------------------------------------------------------------
-st.markdown("## Prediction History")
-hist = load_history()
-if hist is None or hist.empty:
-    st.write("No history yet. Run a prediction to populate history.")
-else:
-    st.dataframe(hist.sort_values("predicted_at", ascending=False).head(200))
-    if st.button("Download history CSV"):
-        st.download_button("Download CSV", data=hist.to_csv(index=False), file_name=os.path.basename(history_file))
-
-st.markdown("## Notes")
 st.markdown("""
-- This app was adapted to match your notebook pipeline (regression targets: next-hour returns).
-- The meta-learner produces a continuous return prediction. Mapping to Buy/Hold/Sell uses the *Return threshold*
-  you set in the sidebar (absolute return). For example, 0.001 = 0.1% next-hour move.
-- The app attempts to load a scaler (StandardScaler) so that sequence/tabular inputs are transformed the same way
-  as during training. If you used different preprocessing during training, ensure you provide the same scaler file.
-- If your CNN/LSTM were saved as Keras .h5 files, the loader will try keras.load_model; if they were pickled by
-  joblib it's also supported.
-- The feature builder is a simplified single-ticker adaptation of the notebook's feature set (lags, vol, RSI, MACD, SMA/EMA).
-- For production, consider stronger alignment (exact feature order used during training), and robust timezone handling.
+This project explores the potential of ensemble deep learning models to identify short-term patterns in financial time series data for hourly price prediction.  
+**Note:** This tool is for educational and research purposes only. Not financial advice!
 """)
+
+st.divider()
+
+# === SECTION 1: LIVE PREDICTION DASHBOARD ===
+st.header("Live Prediction Dashboard")
+
+col1, col2 = st.columns([2, 1])
+with col1:
+    ticker = st.text_input("Enter Stock Ticker (e.g., AAPL, TSLA, MSFT):", value="AAPL")
+    ndays = st.selectbox("Number of historical days to display", options=[1, 7, 30], index=1)
+    predict_btn = st.button("🚀 Predict Next Hour")
+
+with col2:
+    st.empty()  # For extra controls if needed
+
+if predict_btn and ticker:
+    with st.spinner(f"Predicting next hour for {ticker}..."):
+        result, error, df = predict_next_hour(ticker)
+    if error:
+        st.error(error)
+    else:
+        # --- Price Chart ---
+        st.subheader(f"Live Price Chart for {ticker}")
+        df_plot = get_yf_data(ticker, ndays)
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(
+            x=df_plot.index,
+            open=df_plot['Open'],
+            high=df_plot['High'],
+            low=df_plot['Low'],
+            close=df_plot['Close'],
+            name='Price'
+        ))
+        # Mark "NOW"
+        now = df_plot.index[-1]
+        fig.add_vline(x=now, line_dash="dash", line_color="blue", annotation_text="Now", annotation_position="top left")
+        # Predicted price point
+        pred_time = now + pd.Timedelta(hours=1)
+        fig.add_trace(go.Scatter(
+            x=[pred_time],
+            y=[result["predicted_price"]],
+            mode="markers+text",
+            marker=dict(color="green" if result["direction"] == "UP" else "red", size=12),
+            text=[f'Predicted: ${result["predicted_price"]:.2f}'],
+            textposition="bottom center",
+            name='Prediction'
+        ))
+        fig.update_layout(height=400, xaxis_title="Time", yaxis_title="Price ($)")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- Prediction Result Card ---
+        st.markdown("#### Prediction Result")
+        pcol1, pcol2, pcol3, pcol4 = st.columns(4)
+        pcol1.metric("Predicted Price (1H)", f"${result['predicted_price']:.2f}")
+        pcol2.metric("Direction & Magnitude", f"{result['direction']} ({result['pct_change']:+.2f}%)")
+        pcol3.progress(int(result['confidence']), text=f"Model Confidence: {int(result['confidence'])}%")
+        pcol4.markdown(f"**Ensemble Votes:**<br>"
+            f"<span style='color:green'>CNN: {result['votes']['CNN']}</span><br>"
+            f"<span style='color:red'>LSTM: {result['votes']['LSTM']}</span><br>"
+            f"<span style='color:purple'>XGBoost: {result['votes']['XGBoost']}</span>", unsafe_allow_html=True)
+
+        # --- Trading Suggestion ---
+        threshold = 0.2  # percent threshold for "STRONG" signal
+        if abs(result['pct_change']) > threshold:
+            signal = "STRONG BUY" if result['direction'] == "UP" else "STRONG SELL"
+        elif abs(result['pct_change']) > 0.05:
+            signal = "BUY" if result['direction'] == "UP" else "SELL"
+        else:
+            signal = "HOLD"
+        st.info(f"**SIGNAL:** {signal}\n\n"
+                f"The model predicts a {result['pct_change']:+.2f}% {'increase' if result['direction']=='UP' else 'decrease'} within the next hour, with high confidence ({int(result['confidence'])}%).")
+
+        # --- Log the trade for simulation ---
+        entry = {
+            "Timestamp": now,
+            "Ticker": ticker,
+            "Price at Prediction": result["current_price"],
+            "Predicted Price (1H)": result["predicted_price"],
+            "Direction (Predicted)": result["direction"],
+            "Model Confidence (%)": int(result["confidence"]),
+            "CNN": result["votes"]["CNN"],
+            "LSTM": result["votes"]["LSTM"],
+            "XGBoost": result["votes"]["XGBoost"],
+            "Signal": signal,
+            "Profit (%)": None,  # Will be filled after 1H
+            "Actual Price (1H Later)": None,
+            "Direction (Actual)": None,
+            "Was Correct?": None
+        }
+        add_trade_log_entry(entry)
+
+st.divider()
+
+# === SECTION 2: SIMULATION & PERFORMANCE TRACKING ===
+st.header("Trading Simulation Log & Performance")
+
+# --- Update trade log with actual price (if available) ---
+trade_df = get_trade_log_df()
+if not trade_df.empty:
+    # For all entries without actual price, try to fetch it
+    for idx, row in trade_df.iterrows():
+        if pd.isnull(row.get("Actual Price (1H Later)")):
+            ts = row["Timestamp"]
+            ticker = row["Ticker"]
+            df_actual = get_yf_data(ticker, ndays=2)
+            actual_row = df_actual[df_actual.index == ts + pd.Timedelta(hours=1)]
+            if not actual_row.empty:
+                actual_price = actual_row.iloc[0]['Close']
+                pred_price = row["Predicted Price (1H)"]
+                direction_actual = "UP" if actual_price > row["Price at Prediction"] else "DOWN" if actual_price < row["Price at Prediction"] else "HOLD"
+                was_correct = (row["Direction (Predicted)"] == direction_actual)
+                profit = ((actual_price - row["Price at Prediction"]) / row["Price at Prediction"]) * 100 if row["Signal"] != "HOLD" else 0
+                st.session_state.trade_log[idx]["Actual Price (1H Later)"] = actual_price
+                st.session_state.trade_log[idx]["Direction (Actual)"] = direction_actual
+                st.session_state.trade_log[idx]["Was Correct?"] = "Yes" if was_correct else "No"
+                st.session_state.trade_log[idx]["Profit (%)"] = profit
+
+    trade_df = get_trade_log_df()
+
+st.dataframe(trade_df, use_container_width=True, height=300)
+
+# --- Performance Metrics ---
+if not trade_df.empty:
+    total_return = trade_df["Profit (%)"].dropna().sum()
+    accuracy = trade_df["Was Correct?"].dropna().eq("Yes").mean() * 100 if "Was Correct?" in trade_df else 0
+    num_trades = trade_df["Signal"].dropna().apply(lambda x: x != "HOLD").sum()
+    win_rate = trade_df["Profit (%)"].dropna().apply(lambda x: x > 0).mean() * 100 if num_trades > 0 else 0
+    avg_profit = trade_df["Profit (%)"].dropna().mean()
+
+    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    mcol1.metric("Total Return (%)", f"{total_return:.2f}%")
+    mcol2.metric("Accuracy (%)", f"{accuracy:.2f}%")
+    mcol3.metric("Win Rate (%)", f"{win_rate:.2f}%")
+    mcol4.metric("Avg Profit per Trade (%)", f"{avg_profit:.2f}%")
+
+    # --- Equity Curve ---
+    st.subheader("Virtual Portfolio Growth")
+    equity_curve = [START_CAPITAL]
+    for _, row in trade_df.iterrows():
+        profit = row.get("Profit (%)", 0)
+        equity_curve.append(equity_curve[-1] * (1 + profit/100) if profit is not None else equity_curve[-1])
+    equity_curve = equity_curve[1:]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(y=equity_curve, mode="lines", name="Portfolio Value"))
+    fig.update_layout(xaxis_title="Trade #", yaxis_title="Portfolio Value ($)", height=300)
+    st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+
+# === SECTION 3: MODEL EXPLANATION & TECHNICAL DETAILS ===
+st.header("Model Explanation & Technical Details")
+
+exp_col1, exp_col2 = st.columns([2,1])
+
+with exp_col1:
+    st.subheader("How the Meta-Learner Works")
+    st.image("meta_learner_diagram.png", caption="SOLARIS Model Ensemble Architecture", use_column_width=True)
+    st.markdown("""
+    **Flow:**  
+    Input Data → CNN Block → LSTM Block → XGBoost → Meta-Learner (Stacked/Averaged) → Final Prediction  
+    - **CNN:** Pattern recognition in short-term price movement  
+    - **LSTM:** Captures sequential dependencies and "memory" of time series  
+    - **XGBoost:** Handles tabular/structured features  
+    - **Meta-Learner:** Weighted/stacked ensemble for final output
+    """)
+
+with exp_col2:
+    st.subheader("Feature Importance (XGBoost)")
+    if hasattr(xgb_model, "feature_importances_"):
+        # Get feature names - must match order used in tabular input
+        feat_names = [col for col in make_features(get_yf_data("AAPL", 2), ticker="AAPL").columns if col not in ["datetime", "ticker"]]
+        importances = xgb_model.feature_importances_
+        top_idx = np.argsort(importances)[-10:]
+        top_feats = [feat_names[i] for i in top_idx]
+        top_vals = importances[top_idx]
+        imp_fig = go.Figure(go.Bar(x=top_vals, y=top_feats, orientation="h"))
+        imp_fig.update_layout(height=300, xaxis_title="Importance")
+        st.plotly_chart(imp_fig, use_container_width=True)
+    else:
+        st.info("Feature importances not available for XGBoost model.")
+
+st.subheader("Technical Stack")
+st.markdown("""
