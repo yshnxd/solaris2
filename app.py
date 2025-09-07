@@ -136,10 +136,14 @@ def fetch_stock_data(ticker, period="30d", interval="60m"):
         return None
 
 # Function to create features (FIXED VERSION)
+# Function to create features (FIXED VERSION)
 def create_features(df, ticker, all_tickers_data=None):
     """Create features for prediction - FIXED to match training preprocessing"""
     feat_tmp = pd.DataFrame(index=df.index)
     price_series = df['Close']
+    
+    # Add the price feature that the scaler expects
+    feat_tmp["price"] = price_series.ffill()
     
     # Calculate returns with forward fill to preserve data
     for lag in [1, 3, 6, 12, 24]:
