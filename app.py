@@ -210,9 +210,29 @@ def create_sequences(X, seq_len=128):
     return np.array(X_seq)
 
 # Function to make predictions using the actual models (FIXED)
+# Function to make predictions using the actual models (FIXED with feature ordering)
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
-    """Make predictions using the actual trained models - FIXED"""
+    """Make predictions using the actual trained models - FIXED with feature ordering"""
     try:
+        # Get the feature names that the scaler expects
+        if hasattr(scaler, 'feature_names_in_'):
+            expected_features = scaler.feature_names_in_
+        else:
+            # If the scaler doesn't have feature_names_in_ attribute, use a default order
+            # This should match the order used during training
+            expected_features = [
+                'price', 'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h',
+                'vol_6h', 'vol_12h', 'vol_24h', 'rsi_14', 'macd', 'macd_signal',
+                'sma_5', 'sma_10', 'sma_20', 'ema_5', 'ema_10', 'ema_20',
+                'vol_change_1h', 'vol_ma_24h', 'AAPL_ret_1h', 'MSFT_ret_1h',
+                'AMZN_ret_1h', 'GOOGL_ret_1h', 'TSLA_ret_1h', 'NVDA_ret_1h',
+                'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h',
+                'BA_ret_1h', 'META_ret_1h', 'hour', 'day_of_week'
+            ]
+        
+        # Reorder the features to match the scaler's expected order
+        features = features.reindex(columns=expected_features)
+        
         # Scale the features
         features_scaled = scaler.transform(features)
         
