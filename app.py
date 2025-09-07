@@ -135,75 +135,79 @@ def fetch_stock_data(ticker, period="30d", interval="60m"):
         st.error(f"Error fetching data for {ticker}: {str(e)}")
         return None
 
-# Function to create features (replicating notebook preprocessing exactly)
+# Function to create features (FIXED VERSION)
 def create_features(df, ticker, all_tickers_data=None):
-    """Create features for prediction based on the notebook"""
+    """Create features for prediction - FIXED to match training preprocessing"""
     feat_tmp = pd.DataFrame(index=df.index)
     price_series = df['Close']
     
-    # Lag returns (exactly as in notebook)
+    # Calculate returns with forward fill to preserve data
     for lag in [1, 3, 6, 12, 24]:
-        feat_tmp[f"ret_{lag}h"] = price_series.pct_change(lag)
+        feat_tmp[f"ret_{lag}h"] = price_series.pct_change(lag).ffill()
     
-    # Rolling volatility (exactly as in notebook)
+    # Calculate volatility with forward fill
     for window in [6, 12, 24]:
-        feat_tmp[f"vol_{window}h"] = price_series.pct_change().rolling(window).std()
+        feat_tmp[f"vol_{window}h"] = price_series.pct_change().rolling(window).std().ffill()
     
-    # Technical indicators (exactly as in notebook)
+    # Technical indicators with error handling
     try:
-        feat_tmp["rsi_14"] = ta.momentum.RSIIndicator(price_series, window=14).rsi()
+        feat_tmp["rsi_14"] = ta.momentum.RSIIndicator(price_series, window=14).rsi().ffill()
     except Exception:
         feat_tmp["rsi_14"] = np.nan
         
     try:
         macd = ta.trend.MACD(price_series)
-        feat_tmp["macd"] = macd.macd()
-        feat_tmp["macd_signal"] = macd.macd_signal()
+        feat_tmp["macd"] = macd.macd().ffill()
+        feat_tmp["macd_signal"] = macd.macd_signal().ffill()
     except Exception:
         feat_tmp["macd"] = np.nan
         feat_tmp["macd_signal"] = np.nan
     
-    # Moving averages (exactly as in notebook)
+    # Moving averages with forward fill
     for w in [5, 10, 20]:
-        feat_tmp[f"sma_{w}"] = price_series.rolling(w).mean()
-        feat_tmp[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
+        feat_tmp[f"sma_{w}"] = price_series.rolling(w).mean().ffill()
+        feat_tmp[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean().ffill()
     
-    # Volume features (exactly as in notebook)
+    # Volume features with forward fill
     if "Volume" in df.columns:
         vol_series = df["Volume"].ffill()
-        feat_tmp["vol_change_1h"] = vol_series.pct_change()
-        feat_tmp["vol_ma_24h"] = vol_series.rolling(24).mean()
+        feat_tmp["vol_change_1h"] = vol_series.pct_change().ffill()
+        feat_tmp["vol_ma_24h"] = vol_series.rolling(24).mean().ffill()
     
-    # Cross-asset returns (exactly as in notebook)
-    # Use the same tickers as in the notebook
+    # Cross-asset returns with forward fill
     tickers_from_notebook = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
     
     for asset in tickers_from_notebook:
         if asset != ticker and all_tickers_data is not None and asset in all_tickers_data:
-            feat_tmp[f"{asset}_ret_1h"] = all_tickers_data[asset]['Close'].pct_change()
+            # Use the aligned_close approach from notebook
+            feat_tmp[f"{asset}_ret_1h"] = all_tickers_data[asset]['Close'].pct_change().ffill()
         else:
             feat_tmp[f"{asset}_ret_1h"] = np.nan
     
-    # Calendar features (exactly as in notebook)
+    # Calendar features
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
     
-    # Drop rows with NaNs (exactly as in notebook)
+    # Forward fill all columns to handle NaNs
+    feat_tmp = feat_tmp.ffill()
+    
+    # Drop any remaining rows with NaNs
     feat_tmp = feat_tmp.dropna()
     
     return feat_tmp
 
-# Function to prepare sequence data (exactly as in notebook)
+# Function to prepare sequence data (FIXED to handle edge cases)
 def create_sequences(X, seq_len=128):
-    """Convert tabular data into sequences for CNN/LSTM"""
+    """Convert tabular data into sequences for CNN/LSTM - FIXED"""
     X_seq = []
-    for i in range(len(X) - seq_len):
+    start_idx = max(0, len(X) - seq_len)  # Ensure we have enough data
+    for i in range(start_idx, len(X) - seq_len + 1):
         X_seq.append(X[i:i+seq_len])
     return np.array(X_seq)
 
-# Function to make predictions using the actual models
+# Function to make predictions using the actual models (FIXED)
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
-    """Make predictions using the actual trained models"""
+    """Make predictions using the actual trained models - FIXED"""
     try:
         # Scale the features
         features_scaled = scaler.transform(features)
@@ -211,12 +215,16 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
         # Prepare data for CNN and LSTM (sequence data)
         X_seq = create_sequences(features_scaled)
         
+        if len(X_seq) == 0:
+            st.error("Not enough data to create sequences after scaling")
+            return None, None, None, None
+            
         # Get the most recent sequence
         recent_sequence = X_seq[-1].reshape(1, 128, -1)
         
         # Get predictions from each model
-        cnn_pred = cnn_model.predict(recent_sequence)[0][0]
-        lstm_pred = lstm_model.predict(recent_sequence)[0][0]
+        cnn_pred = cnn_model.predict(recent_sequence, verbose=0)[0][0]
+        lstm_pred = lstm_model.predict(recent_sequence, verbose=0)[0][0]
         
         # For XGBoost, use the most recent features (not a sequence)
         xgb_features = features_scaled[-1].reshape(1, -1)
@@ -253,6 +261,8 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
         
     except Exception as e:
         st.error(f"Error making prediction: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None, None, None, None
 
 # Function to update prediction results with actual prices
@@ -391,8 +401,9 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
                 # Create features (exactly as in notebook)
                 features = create_features(stock_data, selected_ticker, all_tickers_data)
                 
+                # Check if we have enough data
                 if len(features) < 128:
-                    st.error("Not enough historical data to generate prediction. Need at least 128 hours of data.")
+                    st.error(f"Not enough historical data to generate prediction. Need at least 128 hours of data, but only have {len(features)}.")
                 else:
                     # Get prediction using the actual models
                     predicted_price, pred_change_pct, votes, confidence = predict_with_models(
