@@ -66,18 +66,16 @@ def load_models():
 
 cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 
-# HARDCODED feature column order based on your notebook's X.columns.tolist()
+# Correct feature column order from your notebook's X.columns.tolist()
 feature_columns = [
-    "price",
-    "ret_1h", "ret_3h", "ret_6h", "ret_12h", "ret_24h",
-    "vol_6h", "vol_12h", "vol_24h",
-    "rsi_14", "macd", "macd_signal",
-    "sma_5", "sma_10", "sma_20",
-    "ema_5", "ema_10", "ema_20",
-    "vol_change_1h", "vol_ma_24h",
-    "AAPL_ret_1h", "MSFT_ret_1h", "AMZN_ret_1h", "GOOGL_ret_1h", "TSLA_ret_1h",
-    "NVDA_ret_1h", "JPM_ret_1h", "JNJ_ret_1h", "XOM_ret_1h", "CAT_ret_1h", "BA_ret_1h", "META_ret_1h",
-    "hour", "day_of_week"
+    'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
+    'vol_6h', 'vol_12h', 'vol_24h', 
+    'rsi_14', 'macd', 'macd_signal', 
+    'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20', 
+    'vol_change_1h', 'vol_ma_24h', 
+    'AAPL_ret_1h', 'MSFT_ret_1h', 'AMZN_ret_1h', 'GOOGL_ret_1h', 'TSLA_ret_1h', 
+    'NVDA_ret_1h', 'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h', 'BA_ret_1h', 'META_ret_1h', 
+    'hour', 'day_of_week', 'price'
 ]
 
 st.sidebar.header("Configuration")
@@ -129,9 +127,6 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     price_series = aligned_ffill[selected_ticker]
     feat_tmp = pd.DataFrame(index=price_series.index)
 
-    # Price column
-    feat_tmp["price"] = price_series
-
     # Lag returns
     for lag in [1, 3, 6, 12, 24]:
         feat_tmp[f"ret_{lag}h"] = price_series.pct_change(lag)
@@ -173,11 +168,14 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
 
+    # Price column LAST (so notebook order matches)
+    feat_tmp["price"] = price_series
+
     # Drop rows with NaNs in any feature column
-    drop_cols = [col for col in feat_tmp.columns if col not in ["datetime", "ticker"]]
+    drop_cols = feature_columns
     feat_tmp = feat_tmp.dropna(subset=drop_cols)
 
-    # Enforce column order (from your notebook's X.columns)
+    # Enforce column order from your notebook's X.columns
     missing = set(feature_columns) - set(feat_tmp.columns)
     if missing:
         st.error(f"Missing columns in features: {missing}")
