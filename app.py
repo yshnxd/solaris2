@@ -66,7 +66,7 @@ def load_models():
 
 cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 
-# HARDCODED feature column order used in training
+# HARDCODED feature column order based on your notebook's X.columns.tolist()
 feature_columns = [
     "price",
     "ret_1h", "ret_3h", "ret_6h", "ret_12h", "ret_24h",
@@ -162,12 +162,13 @@ def create_features(df, ticker, aligned_ffill, all_data):
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
     feat_tmp = feat_tmp.dropna()
-    # PATCH: enforce column order
-    try:
-        feat_tmp = feat_tmp.loc[:, feature_columns]
-    except Exception as e:
-        st.error(f"Feature column order mismatch: {e}")
+    # PATCH: enforce column order and check for missing columns
+    missing = set(feature_columns) - set(feat_tmp.columns)
+    if missing:
+        st.error("Missing columns in features: " + str(missing))
         return pd.DataFrame()
+    # Only use correct columns and order
+    feat_tmp = feat_tmp.loc[:, feature_columns]
     return feat_tmp
 
 def create_sequences(X, seq_len=128):
@@ -178,6 +179,12 @@ def create_sequences(X, seq_len=128):
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
     try:
+        # PATCH: enforce column order before scaling
+        missing = set(feature_columns) - set(features.columns)
+        if missing:
+            st.error("Missing columns in features: " + str(missing))
+            return None, None, None, None
+        features = features.loc[:, feature_columns]
         features_scaled = scaler.transform(features)
         X_seq = create_sequences(features_scaled)
         if len(X_seq) == 0:
