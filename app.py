@@ -125,16 +125,22 @@ def get_aligned_ffill(tickers, days_history):
     aligned_ffill = aligned_close.ffill()
     return aligned_ffill, all_data
 
-def create_features(df, ticker, aligned_ffill, all_data):
-    feat_tmp = pd.DataFrame(index=df.index)
-    price_series = df['Close']
+def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
+    price_series = aligned_ffill[selected_ticker]
+    feat_tmp = pd.DataFrame(index=price_series.index)
 
+    # === Add "price" column (as in label creation) ===
     feat_tmp["price"] = price_series
 
+    # Lag returns
     for lag in [1, 3, 6, 12, 24]:
         feat_tmp[f"ret_{lag}h"] = price_series.pct_change(lag)
+
+    # Rolling volatility
     for window in [6, 12, 24]:
         feat_tmp[f"vol_{window}h"] = price_series.pct_change().rolling(window).std()
+
+    # Technical indicators
     try:
         feat_tmp["rsi_14"] = ta.momentum.RSIIndicator(price_series, window=14).rsi()
     except Exception:
@@ -146,28 +152,37 @@ def create_features(df, ticker, aligned_ffill, all_data):
     except Exception:
         feat_tmp["macd"] = np.nan
         feat_tmp["macd_signal"] = np.nan
+
+    # Moving averages
     for w in [5, 10, 20]:
         feat_tmp[f"sma_{w}"] = price_series.rolling(w).mean()
         feat_tmp[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
-    if "Volume" in df.columns:
-        vol_series = df["Volume"].ffill()
+
+    # Volume features
+    if selected_ticker in data_dict and "Volume" in data_dict[selected_ticker].columns:
+        vol_series = data_dict[selected_ticker].reindex(price_series.index)["Volume"].ffill()
         feat_tmp["vol_change_1h"] = vol_series.pct_change()
         feat_tmp["vol_ma_24h"] = vol_series.rolling(24).mean()
-    tickers_from_notebook = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
-    for asset in tickers_from_notebook:
+
+    # Cross-asset returns from aligned_ffill (not from all_tickers_data)
+    cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
+    for asset in cross_assets:
         if asset in aligned_ffill.columns:
             feat_tmp[f"{asset}_ret_1h"] = aligned_ffill[asset].pct_change()
-        else:
-            feat_tmp[f"{asset}_ret_1h"] = np.nan
+
+    # Calendar features
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
-    feat_tmp = feat_tmp.dropna()
-    # PATCH: enforce column order and check for missing columns
+
+    # Drop rows with NaNs for actual feature columns
+    drop_cols = [col for col in feat_tmp.columns if col not in ["datetime", "ticker"]]
+    feat_tmp = feat_tmp.dropna(subset=drop_cols)
+
+    # Final feature column order: exactly as in your notebook X.columns
     missing = set(feature_columns) - set(feat_tmp.columns)
     if missing:
-        st.error("Missing columns in features: " + str(missing))
+        st.error(f"Missing columns in features: {missing}")
         return pd.DataFrame()
-    # Only use correct columns and order
     feat_tmp = feat_tmp.loc[:, feature_columns]
     return feat_tmp
 
@@ -179,7 +194,6 @@ def create_sequences(X, seq_len=128):
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
     try:
-        # PATCH: enforce column order before scaling
         missing = set(feature_columns) - set(features.columns)
         if missing:
             st.error("Missing columns in features: " + str(missing))
@@ -301,7 +315,7 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
             st.plotly_chart(fig, use_container_width=True)
             if run_prediction:
                 with st.spinner('Generating prediction...'):
-                    features = create_features(stock_data, selected_ticker, aligned_ffill, all_tickers_data)
+                    features = create_features_for_app(selected_ticker, aligned_ffill, all_tickers_data)
                     if len(features) < 128:
                         st.error("Not enough historical data to generate prediction. Need at least 128 hours of data.")
                     else:
