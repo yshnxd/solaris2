@@ -78,23 +78,19 @@ feature_columns = [
     'hour', 'day_of_week', 'price'
 ]
 
+# ... [imports and configs unchanged] ...
+
 cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
-
-st.sidebar.header("Configuration")
-selected_ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL").upper()
-days_history = st.sidebar.text_input("Days of Historical Data (90-729)", value="180")
-
-try:
-    days_history = int(days_history)
-    if days_history < 90 or days_history > 729:
-        st.sidebar.error("Please enter a value between 90 and 729")
-        days_history = 180
-except ValueError:
-    st.sidebar.error("Please enter a valid number")
-    days_history = 180
-
-run_prediction = st.sidebar.button("🚀 Predict Next Hour")
-update_predictions = st.sidebar.button("🔄 Update Prediction Results")
+feature_columns = [
+    'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
+    'vol_6h', 'vol_12h', 'vol_24h', 
+    'rsi_14', 'macd', 'macd_signal', 
+    'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20', 
+    'vol_change_1h', 'vol_ma_24h', 
+    'AAPL_ret_1h', 'MSFT_ret_1h', 'AMZN_ret_1h', 'GOOGL_ret_1h', 'TSLA_ret_1h', 
+    'NVDA_ret_1h', 'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h', 'BA_ret_1h', 'META_ret_1h', 
+    'hour', 'day_of_week', 'price'
+]
 
 @st.cache_data(ttl=300)
 def fetch_stock_data(ticker, period="729d", interval="60m"):
@@ -108,28 +104,19 @@ def fetch_stock_data(ticker, period="729d", interval="60m"):
     except Exception as e:
         return None
 
-def get_aligned_ffill(selected_ticker, cross_assets, days_history):
-    universe = set(cross_assets)
-    universe.add(selected_ticker)
-    all_data = {}
-    for t in universe:
-        df = fetch_stock_data(t, period=f"{days_history}d", interval="60m")
+def fetch_cross_assets(selected_index, days_history):
+    # Returns a dict of cross-asset close prices aligned to selected_index
+    cross_data = {}
+    for asset in cross_assets:
+        df = fetch_stock_data(asset, period=f"{days_history}d", interval="60m")
         if df is not None and not df.empty:
-            all_data[t] = df
-    if selected_ticker not in all_data or all_data[selected_ticker].empty:
-        return None, None
-    target_index = all_data[selected_ticker].index
-    aligned_close = pd.DataFrame(index=target_index)
-    for t in universe:
-        if t in all_data:
-            aligned_close[t] = all_data[t].reindex(target_index)['Close']
+            cross_data[asset] = df.reindex(selected_index)['Close'].ffill()
         else:
-            aligned_close[t] = np.nan
-    aligned_ffill = aligned_close.ffill()
-    return aligned_ffill, all_data
+            cross_data[asset] = pd.Series(0, index=selected_index) # Fill missing with zero
+    return cross_data
 
-def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
-    price_series = aligned_ffill[selected_ticker]
+def create_features_for_app(selected_ticker, ticker_data, cross_data):
+    price_series = ticker_data['Close']
     feat_tmp = pd.DataFrame(index=price_series.index)
 
     # Lag returns
@@ -144,34 +131,31 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     try:
         feat_tmp["rsi_14"] = ta.momentum.RSIIndicator(price_series, window=14).rsi()
     except Exception:
-        feat_tmp["rsi_14"] = np.nan
+        feat_tmp["rsi_14"] = 0
     try:
         macd = ta.trend.MACD(price_series)
         feat_tmp["macd"] = macd.macd()
         feat_tmp["macd_signal"] = macd.macd_signal()
     except Exception:
-        feat_tmp["macd"] = np.nan
-        feat_tmp["macd_signal"] = np.nan
+        feat_tmp["macd"] = 0
+        feat_tmp["macd_signal"] = 0
 
     for w in [5, 10, 20]:
         feat_tmp[f"sma_{w}"] = price_series.rolling(w).mean()
         feat_tmp[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
 
     # Volume features
-    if selected_ticker in data_dict and "Volume" in data_dict[selected_ticker].columns:
-        vol_series = data_dict[selected_ticker].reindex(price_series.index)["Volume"].ffill()
+    if "Volume" in ticker_data.columns:
+        vol_series = ticker_data['Volume'].ffill()
         feat_tmp["vol_change_1h"] = vol_series.pct_change()
         feat_tmp["vol_ma_24h"] = vol_series.rolling(24).mean()
     else:
-        feat_tmp["vol_change_1h"] = np.nan
-        feat_tmp["vol_ma_24h"] = np.nan
+        feat_tmp["vol_change_1h"] = 0
+        feat_tmp["vol_ma_24h"] = 0
 
-    # Cross-asset returns
+    # Cross-asset returns (always present, filled with 0 if missing)
     for asset in cross_assets:
-        if asset in aligned_ffill.columns:
-            feat_tmp[f"{asset}_ret_1h"] = aligned_ffill[asset].pct_change()
-        else:
-            feat_tmp[f"{asset}_ret_1h"] = np.nan
+        feat_tmp[f"{asset}_ret_1h"] = cross_data[asset].pct_change().fillna(0)
 
     # Calendar features
     feat_tmp["hour"] = feat_tmp.index.hour
@@ -180,109 +164,24 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     # Price column LAST
     feat_tmp["price"] = price_series
 
-    # Fill cross-asset and technical feature NaNs with 0
-    for asset in cross_assets:
-        feat_tmp[f"{asset}_ret_1h"] = feat_tmp[f"{asset}_ret_1h"].fillna(0)
-    feat_tmp["vol_change_1h"] = feat_tmp["vol_change_1h"].fillna(0)
-    feat_tmp["vol_ma_24h"] = feat_tmp["vol_ma_24h"].fillna(0)
-    for col in ["rsi_14", "macd", "macd_signal"]:
+    # Fill technical NaNs with 0, only drop rows missing price
+    for col in ["rsi_14", "macd", "macd_signal", "vol_change_1h", "vol_ma_24h"]:
         feat_tmp[col] = feat_tmp[col].fillna(0)
     feat_tmp = feat_tmp.dropna(subset=["price"])
 
+    # Enforce column order
     missing = set(feature_columns) - set(feat_tmp.columns)
-    if missing:
-        st.error(f"Missing columns in features: {missing}")
-        return pd.DataFrame()
-    feat_tmp = feat_tmp.loc[:, feature_columns]
-    return feat_tmp
+    for m in missing:
+        feat_tmp[m] = 0
+    return feat_tmp.loc[:, feature_columns]
 
-def create_sequences(X, seq_len=128):
-    X_seq = []
-    for i in range(len(X) - seq_len):
-        X_seq.append(X[i:i+seq_len])
-    return np.array(X_seq)
-
-def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
-    try:
-        features = features.loc[:, feature_columns]
-        features_scaled = scaler.transform(features)
-        X_seq = create_sequences(features_scaled)
-        if len(X_seq) == 0:
-            raise ValueError("Not enough data for sequence prediction.")
-        recent_sequence = X_seq[-1].reshape(1, 128, features_scaled.shape[1])
-        cnn_pred = cnn_model.predict(recent_sequence)[0][0]
-        lstm_pred = lstm_model.predict(recent_sequence)[0][0]
-        xgb_features = features_scaled[-1].reshape(1, -1)
-        xgb_pred = xgb_model.predict(xgb_features)[0]
-        meta_features = np.array([[cnn_pred, lstm_pred, xgb_pred]])
-        meta_features = np.column_stack([
-            meta_features, 
-            meta_features.mean(axis=1),
-            meta_features.std(axis=1),
-            meta_features.max(axis=1),
-            meta_features.min(axis=1)
-        ])
-        final_pred = meta_model.predict(meta_features)[0]
-        predicted_price = current_price * (1 + final_pred)
-        pred_change_pct = final_pred * 100
-        votes = {
-            "CNN": "UP" if cnn_pred > current_price else "DOWN",
-            "LSTM": "UP" if lstm_pred > current_price else "DOWN",
-            "XGBoost": "UP" if xgb_pred > current_price else "DOWN"
-        }
-        agreement = sum(1 for v in votes.values() if v == ("UP" if pred_change_pct > 0 else "DOWN")) / 3
-        confidence = min(95, agreement * 100 + min(20, abs(pred_change_pct) * 2))
-        return predicted_price, pred_change_pct, votes, confidence
-    except Exception as e:
-        st.error(f"Error making prediction: {str(e)}")
-        return None, None, None, None
-
-def update_prediction_results():
-    if not st.session_state.prediction_log:
-        return
-    updated_log = []
-    correct_predictions = 0
-    total_return = 0
-    for prediction in st.session_state.prediction_log:
-        if 'actual_price' not in prediction:
-            ticker = prediction['ticker']
-            prediction_time = datetime.strptime(prediction['timestamp'], "%Y-%m-%d %H:%M")
-            target_time = prediction_time + timedelta(hours=1)
-            try:
-                stock_data = fetch_stock_data(ticker, period="2d", interval="60m")
-                if stock_data is None or stock_data.empty:
-                    continue
-                time_diff = abs(stock_data.index - target_time)
-                closest_idx = time_diff.argmin()
-                actual_price = stock_data.iloc[closest_idx]['Close']
-                predicted_direction = "UP" if prediction['predicted_price'] > prediction['current_price'] else "DOWN"
-                actual_direction = "UP" if actual_price > prediction['current_price'] else "DOWN"
-                correct = predicted_direction == actual_direction
-                return_pct = (actual_price - prediction['current_price']) / prediction['current_price'] * 100
-                prediction['actual_price'] = actual_price
-                prediction['actual_direction'] = actual_direction
-                prediction['correct'] = correct
-                prediction['return_pct'] = return_pct
-                if correct:
-                    correct_predictions += 1
-                total_return += return_pct
-            except Exception as e:
-                st.error(f"Error updating prediction for {ticker}: {str(e)}")
-        updated_log.append(prediction)
-    st.session_state.prediction_log = updated_log
-    if st.session_state.prediction_log:
-        st.session_state.performance_metrics['total_predictions'] = len(st.session_state.prediction_log)
-        st.session_state.performance_metrics['correct_predictions'] = correct_predictions
-        st.session_state.performance_metrics['accuracy'] = correct_predictions / len(st.session_state.prediction_log) * 100
-        st.session_state.performance_metrics['total_return'] = total_return
-        st.session_state.performance_metrics['avg_return'] = total_return / len(st.session_state.prediction_log)
-
-# --- MAIN TICKER CHART AND METRICS ---
+# ----------- MAIN APP LOGIC -----------
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
-if main_ticker_data is None or main_ticker_data.empty:
-    st.error(f"No data found for ticker: {selected_ticker}. Please check the symbol or try another stock.")
+if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
+    st.error(f"No or insufficient data found for ticker: {selected_ticker}. Please check the symbol or try another stock.")
 else:
+    # Chart & Metrics
     latest_data = main_ticker_data.iloc[-1]
     current_price = latest_data['Close']
     current_time = latest_data.name
@@ -317,96 +216,93 @@ else:
                      xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- PREDICTION PIPELINE ---
+    # Prediction logic
     if cnn_model and lstm_model and xgb_model and meta_model and scaler:
         if update_predictions:
             with st.spinner('Updating prediction results...'):
                 update_prediction_results()
-        aligned_ffill, all_tickers_data = get_aligned_ffill(selected_ticker, cross_assets, days_history)
-        if aligned_ffill is None:
-            st.warning("Not enough data for selected ticker for feature engineering. Try increasing days of history.")
-        else:
-            if run_prediction:
-                with st.spinner('Generating prediction...'):
-                    features = create_features_for_app(selected_ticker, aligned_ffill, all_tickers_data)
-                    if len(features) < 128:
-                        st.error("Not enough historical data to generate prediction. Need at least 128 hours of data.")
-                    else:
-                        predicted_price, pred_change_pct, votes, confidence = predict_with_models(
-                            features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model
-                        )
-                        if predicted_price is not None:
-                            vote_display = {
-                                "CNN": "UP" if votes["CNN"] == "UP" else "DOWN",
-                                "LSTM": "UP" if votes["LSTM"] == "UP" else "DOWN",
-                                "XGBoost": "UP" if votes["XGBoost"] == "UP" else "DOWN"
-                            }
-                            st.markdown("## Prediction Results")
-                            pred_col1, pred_col2, pred_col3 = st.columns(3)
-                            with pred_col1:
-                                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                                st.metric("Predicted Price", f"${predicted_price:.2f}", 
-                                         f"{pred_change_pct:.2f}%")
-                                st.markdown('</div>', unsafe_allow_html=True)
-                            with pred_col2:
-                                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                                st.write("**Model Votes**")
-                                for model, vote in vote_display.items():
-                                    color_class = "positive" if vote == "UP" else "negative"
-                                    st.markdown(f"{model}: <span class='{color_class}'>{vote}</span>", 
-                                               unsafe_allow_html=True)
-                                st.write("**Confidence**")
-                                st.progress(confidence/100)
-                                st.write(f"{confidence:.1f}%")
-                                st.markdown('</div>', unsafe_allow_html=True)
-                            with pred_col3:
-                                st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                                if pred_change_pct > 1.0 and confidence > 70:
-                                    st.success("**SIGNAL: STRONG BUY**")
-                                    st.write(f"The model predicts a {pred_change_pct:.2f}% increase with high confidence.")
-                                elif pred_change_pct > 0.5:
-                                    st.info("**SIGNAL: BUY**")
-                                    st.write(f"The model predicts a {pred_change_pct:.2f}% increase.")
-                                elif pred_change_pct < -1.0 and confidence > 70:
-                                    st.error("**SIGNAL: STRONG SELL**")
-                                    st.write(f"The model predicts a {abs(pred_change_pct):.2f}% decrease with high confidence.")
-                                elif pred_change_pct < -0.5:
-                                    st.warning("**SIGNAL: SELL**")
-                                    st.write(f"The model predicts a {abs(pred_change_pct):.2f}% decrease.")
-                                else:
-                                    st.info("**SIGNAL: HOLD**")
-                                    st.write("No strong directional signal detected.")
-                                st.markdown('</div>', unsafe_allow_html=True)
-                            prediction_time = datetime.now()
-                            log_entry = {
-                                "timestamp": prediction_time.strftime("%Y-%m-%d %H:%M"),
-                                "ticker": selected_ticker,
-                                "current_price": current_price,
-                                "predicted_price": predicted_price,
-                                "predicted_change": pred_change_pct,
-                                "confidence": confidence,
-                                "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD"
-                            }
-                            st.session_state.prediction_log.append(log_entry)
-                            st.info("Prediction logged. Use the 'Update Prediction Results' button in the sidebar to check actual results after market hours.")
-            if st.session_state.prediction_log:
-                st.markdown("## Prediction History")
-                log_df = pd.DataFrame(st.session_state.prediction_log)
-                if 'correct' in log_df.columns:
-                    accuracy = st.session_state.performance_metrics['accuracy']
-                    total_return = st.session_state.performance_metrics['total_return']
-                    avg_return = st.session_state.performance_metrics['avg_return']
-                    st.markdown("### Real-Time Performance")
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Total Predictions", st.session_state.performance_metrics['total_predictions'])
-                    with col2:
-                        st.metric("Accuracy", f"{accuracy:.1f}%")
-                    with col3:
-                        st.metric("Total Return", f"{total_return:.2f}%")
-                    with col4:
-                        st.metric("Avg Return", f"{avg_return:.2f}%")
-                st.dataframe(log_df, use_container_width=True)
+        cross_data = fetch_cross_assets(main_ticker_data.index, days_history)
+        if run_prediction:
+            with st.spinner('Generating prediction...'):
+                features = create_features_for_app(selected_ticker, main_ticker_data, cross_data)
+                if len(features) < 128:
+                    st.error("Not enough historical data to generate prediction. Need at least 128 hours of data.")
+                else:
+                    predicted_price, pred_change_pct, votes, confidence = predict_with_models(
+                        features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model
+                    )
+                    if predicted_price is not None:
+                        vote_display = {
+                            "CNN": "UP" if votes["CNN"] == "UP" else "DOWN",
+                            "LSTM": "UP" if votes["LSTM"] == "UP" else "DOWN",
+                            "XGBoost": "UP" if votes["XGBoost"] == "UP" else "DOWN"
+                        }
+                        st.markdown("## Prediction Results")
+                        pred_col1, pred_col2, pred_col3 = st.columns(3)
+                        with pred_col1:
+                            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                            st.metric("Predicted Price", f"${predicted_price:.2f}", 
+                                     f"{pred_change_pct:.2f}%")
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        with pred_col2:
+                            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                            st.write("**Model Votes**")
+                            for model, vote in vote_display.items():
+                                color_class = "positive" if vote == "UP" else "negative"
+                                st.markdown(f"{model}: <span class='{color_class}'>{vote}</span>", 
+                                           unsafe_allow_html=True)
+                            st.write("**Confidence**")
+                            st.progress(confidence/100)
+                            st.write(f"{confidence:.1f}%")
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        with pred_col3:
+                            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                            if pred_change_pct > 1.0 and confidence > 70:
+                                st.success("**SIGNAL: STRONG BUY**")
+                                st.write(f"The model predicts a {pred_change_pct:.2f}% increase with high confidence.")
+                            elif pred_change_pct > 0.5:
+                                st.info("**SIGNAL: BUY**")
+                                st.write(f"The model predicts a {pred_change_pct:.2f}% increase.")
+                            elif pred_change_pct < -1.0 and confidence > 70:
+                                st.error("**SIGNAL: STRONG SELL**")
+                                st.write(f"The model predicts a {abs(pred_change_pct):.2f}% decrease with high confidence.")
+                            elif pred_change_pct < -0.5:
+                                st.warning("**SIGNAL: SELL**")
+                                st.write(f"The model predicts a {abs(pred_change_pct):.2f}% decrease.")
+                            else:
+                                st.info("**SIGNAL: HOLD**")
+                                st.write("No strong directional signal detected.")
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        prediction_time = datetime.now()
+                        log_entry = {
+                            "timestamp": prediction_time.strftime("%Y-%m-%d %H:%M"),
+                            "ticker": selected_ticker,
+                            "current_price": current_price,
+                            "predicted_price": predicted_price,
+                            "predicted_change": pred_change_pct,
+                            "confidence": confidence,
+                            "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD"
+                        }
+                        st.session_state.prediction_log.append(log_entry)
+                        st.info("Prediction logged. Use the 'Update Prediction Results' button in the sidebar to check actual results after market hours.")
+        if st.session_state.prediction_log:
+            st.markdown("## Prediction History")
+            log_df = pd.DataFrame(st.session_state.prediction_log)
+            if 'correct' in log_df.columns:
+                accuracy = st.session_state.performance_metrics['accuracy']
+                total_return = st.session_state.performance_metrics['total_return']
+                avg_return = st.session_state.performance_metrics['avg_return']
+                st.markdown("### Real-Time Performance")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Predictions", st.session_state.performance_metrics['total_predictions'])
+                with col2:
+                    st.metric("Accuracy", f"{accuracy:.1f}%")
+                with col3:
+                    st.metric("Total Return", f"{total_return:.2f}%")
+                with col4:
+                    st.metric("Avg Return", f"{avg_return:.2f}%")
+            st.dataframe(log_df, use_container_width=True)
     st.markdown("---")
     st.markdown("## How SOLARIS Works")
     exp_col1, exp_col2 = st.columns(2)
