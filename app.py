@@ -69,10 +69,8 @@ cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 # Original cross assets used in training
 original_cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
 
-# Dynamic cross assets - will be determined based on selected ticker
 dynamic_cross_assets = original_cross_assets.copy()
 
-# Define the base feature columns (without the cross-asset returns)
 base_feature_columns = [
     'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
     'vol_6h', 'vol_12h', 'vol_24h', 
@@ -81,6 +79,8 @@ base_feature_columns = [
     'vol_change_1h', 'vol_ma_24h', 
     'hour', 'day_of_week', 'price'
 ]
+
+SEQ_LEN = 128  # Sequence length for CNN/LSTM
 
 @st.cache_data(ttl=300)
 def fetch_stock_data(ticker, period="729d", interval="60m"):
@@ -95,37 +95,30 @@ def fetch_stock_data(ticker, period="729d", interval="60m"):
         return None
 
 def fetch_cross_assets(selected_index, days_history, selected_ticker):
-    # Update dynamic cross assets to exclude the selected ticker
     global dynamic_cross_assets
     if selected_ticker in dynamic_cross_assets:
         dynamic_cross_assets = [a for a in original_cross_assets if a != selected_ticker]
     else:
-        # If selected ticker is not in original list, use the first 11 from original
         dynamic_cross_assets = original_cross_assets[:11]
-    
-    # Returns a dict of cross-asset close prices aligned to selected_index
     cross_data = {}
     for asset in dynamic_cross_assets:
         df = fetch_stock_data(asset, period=f"{days_history}d", interval="60m")
         if df is not None and not df.empty:
             cross_data[asset] = df.reindex(selected_index)['Close'].ffill()
         else:
-            cross_data[asset] = pd.Series(0, index=selected_index) # Fill missing with zero
+            cross_data[asset] = pd.Series(0, index=selected_index)
     return cross_data
 
 def create_features_for_app(selected_ticker, ticker_data, cross_data):
     price_series = ticker_data['Close']
     feat_tmp = pd.DataFrame(index=price_series.index)
 
-    # Lag returns
     for lag in [1, 3, 6, 12, 24]:
         feat_tmp[f"ret_{lag}h"] = price_series.pct_change(lag)
 
-    # Rolling volatility
     for window in [6, 12, 24]:
         feat_tmp[f"vol_{window}h"] = price_series.pct_change().rolling(window).std()
 
-    # Technical indicators
     try:
         feat_tmp["rsi_14"] = ta.momentum.RSIIndicator(price_series, window=14).rsi()
     except Exception:
@@ -142,7 +135,6 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp[f"sma_{w}"] = price_series.rolling(w).mean()
         feat_tmp[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
 
-    # Volume features
     if "Volume" in ticker_data.columns:
         vol_series = ticker_data['Volume'].ffill()
         feat_tmp["vol_change_1h"] = vol_series.pct_change()
@@ -151,54 +143,101 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp["vol_change_1h"] = 0
         feat_tmp["vol_ma_24h"] = 0
 
-    # Cross-asset returns (always present, filled with 0 if missing)
     for asset in dynamic_cross_assets:
         feat_tmp[f"{asset}_ret_1h"] = cross_data[asset].pct_change().fillna(0)
 
-    # Calendar features
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
-
-    # Price column LAST
     feat_tmp["price"] = price_series
 
-    # Fill technical NaNs with 0, only drop rows missing price
     for col in ["rsi_14", "macd", "macd_signal", "vol_change_1h", "vol_ma_24h"]:
         feat_tmp[col] = feat_tmp[col].fillna(0)
     feat_tmp = feat_tmp.dropna(subset=["price"])
 
-    # Build the complete feature columns list dynamically
     cross_asset_features = [f"{asset}_ret_1h" for asset in dynamic_cross_assets]
     complete_feature_columns = base_feature_columns[:-1] + cross_asset_features + [base_feature_columns[-1]]
-    
-    # Ensure we have all required columns
+
     missing = set(complete_feature_columns) - set(feat_tmp.columns)
     for m in missing:
         feat_tmp[m] = 0
-        
+
     return feat_tmp.loc[:, complete_feature_columns]
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
-    # This function should implement the prediction logic
-    # For now, return dummy values
-    predicted_price = current_price * 1.01  # 1% increase as example
-    pred_change_pct = 1.0
-    votes = {"CNN": "UP", "LSTM": "UP", "XGBoost": "DOWN"}
-    confidence = 75.5
-    
+    """
+    Predict using the CNN, LSTM, XGBoost and Meta Learner.
+    """
+    if scaler is None or cnn_model is None or lstm_model is None or xgb_model is None or meta_model is None:
+        return None, None, None, None
+
+    # Take the most recent SEQ_LEN + 1 rows (for sequence & tabular)
+    if len(features) < SEQ_LEN:
+        return None, None, None, None
+    features_recent = features.iloc[-SEQ_LEN:]
+    features_tabular = features.iloc[-1:]
+
+    # Scale features
+    X_seq = scaler.transform(features_recent)
+    X_tab = scaler.transform(features_tabular)
+
+    # CNN/LSTM expect (1, SEQ_LEN, n_features)
+    X_seq = X_seq.reshape(1, SEQ_LEN, -1)
+    # XGBoost expects (1, n_features)
+    X_tab = X_tab.reshape(1, -1)
+
+    # Predict next-hour return (not price)
+    try:
+        pred_cnn = cnn_model.predict(X_seq, verbose=0)
+        pred_cnn = float(pred_cnn[0][0])
+    except Exception as e:
+        pred_cnn = 0.0
+
+    try:
+        pred_lstm = lstm_model.predict(X_seq, verbose=0)
+        pred_lstm = float(pred_lstm[0][0])
+    except Exception as e:
+        pred_lstm = 0.0
+
+    try:
+        pred_xgb = xgb_model.predict(X_tab)
+        pred_xgb = float(pred_xgb[0])
+    except Exception as e:
+        pred_xgb = 0.0
+
+    # Meta learner features: base preds + stats (mean, std, max, min)
+    meta_feats = np.array([pred_cnn, pred_lstm, pred_xgb])
+    meta_stats = np.array([meta_feats.mean(), meta_feats.std(), meta_feats.max(), meta_feats.min()])
+    meta_input = np.concatenate([meta_feats, meta_stats]).reshape(1, -1)
+    try:
+        pred_meta = meta_model.predict(meta_input)
+        pred_meta = float(pred_meta[0])
+    except Exception as e:
+        pred_meta = np.mean([pred_cnn, pred_lstm, pred_xgb])
+
+    # Compute predicted price (current * (1 + pred_meta))
+    predicted_price = current_price * (1 + pred_meta)
+    pred_change_pct = pred_meta * 100
+
+    # Votes
+    votes = {
+        "CNN": "UP" if pred_cnn > 0 else "DOWN",
+        "LSTM": "UP" if pred_lstm > 0 else "DOWN",
+        "XGBoost": "UP" if pred_xgb > 0 else "DOWN"
+    }
+    # Confidence = agreement among models, weighted by absolute returns
+    agreement = [pred_cnn, pred_lstm, pred_xgb]
+    up_count = sum([1 for v in agreement if v > 0])
+    down_count = sum([1 for v in agreement if v < 0])
+    confidence = (max(up_count, down_count) / 3) * 100
+
     return predicted_price, pred_change_pct, votes, confidence
 
 def update_prediction_results():
-    # This function should update the prediction results based on actual market movement
-    # For now, just update with dummy values
     if st.session_state.prediction_log:
         latest_pred = st.session_state.prediction_log[-1]
-        # Simulate some results
         latest_pred["actual_price"] = latest_pred["current_price"] * (1 + np.random.uniform(-0.02, 0.03))
         latest_pred["actual_change"] = (latest_pred["actual_price"] - latest_pred["current_price"]) / latest_pred["current_price"] * 100
         latest_pred["correct"] = (latest_pred["predicted_change"] > 0) == (latest_pred["actual_change"] > 0)
-        
-        # Update performance metrics
         st.session_state.performance_metrics['total_predictions'] += 1
         if latest_pred["correct"]:
             st.session_state.performance_metrics['correct_predictions'] += 1
@@ -212,20 +251,17 @@ def update_prediction_results():
             st.session_state.performance_metrics['total_predictions']
         )
 
-# Sidebar inputs
 st.sidebar.header("Configuration")
 selected_ticker = st.sidebar.text_input("Stock Ticker", "AAPL").upper()
 days_history = st.sidebar.slider("Days of History", min_value=30, max_value=729, value=90)
 run_prediction = st.sidebar.button("Run Prediction")
 update_predictions = st.sidebar.button("Update Prediction Results")
 
-# ----------- MAIN APP LOGIC -----------
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
 if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
     st.error(f"No or insufficient data found for ticker: {selected_ticker}. Please check the symbol or try another stock.")
 else:
-    # Chart & Metrics
     latest_data = main_ticker_data.iloc[-1]
     current_price = latest_data['Close']
     current_time = latest_data.name
@@ -260,7 +296,6 @@ else:
                      xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
-    # Prediction logic
     if cnn_model and lstm_model and xgb_model and meta_model and scaler:
         if update_predictions:
             with st.spinner('Updating prediction results...'):
