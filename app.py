@@ -66,7 +66,7 @@ def load_models():
 
 cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 
-# Correct feature column order from your notebook's X.columns.tolist()
+# Feature column order from your notebook's X.columns.tolist()
 feature_columns = [
     'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
     'vol_6h', 'vol_12h', 'vol_24h', 
@@ -127,7 +127,8 @@ def get_aligned_ffill(selected_ticker, cross_assets, days_history):
         if t in all_data:
             aligned_close[t] = all_data[t].reindex(target_index)['Close']
         else:
-            aligned_close[t] = np.nan  # ensure all cross-asset columns exist
+            # If cross-asset is missing, fill column with NaN
+            aligned_close[t] = np.nan
     aligned_ffill = aligned_close.ffill()
     return aligned_ffill, all_data
 
@@ -180,14 +181,20 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
 
-    # Price column LAST (as in notebook)
+    # Price column LAST
     feat_tmp["price"] = price_series
 
-    # Drop rows with NaNs in any feature column
-    drop_cols = feature_columns
-    feat_tmp = feat_tmp.dropna(subset=drop_cols)
+    # Fill cross-asset and technical feature NaNs with 0
+    for asset in cross_assets:
+        feat_tmp[f"{asset}_ret_1h"] = feat_tmp[f"{asset}_ret_1h"].fillna(0)
+    feat_tmp["vol_change_1h"] = feat_tmp["vol_change_1h"].fillna(0)
+    feat_tmp["vol_ma_24h"] = feat_tmp["vol_ma_24h"].fillna(0)
+    for col in ["rsi_14", "macd", "macd_signal"]:
+        feat_tmp[col] = feat_tmp[col].fillna(0)
+    # Drop only rows missing price
+    feat_tmp = feat_tmp.dropna(subset=["price"])
 
-    # Enforce column order from your notebook's X.columns
+    # Enforce column order
     missing = set(feature_columns) - set(feat_tmp.columns)
     if missing:
         st.error(f"Missing columns in features: {missing}")
