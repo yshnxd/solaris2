@@ -129,7 +129,7 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     price_series = aligned_ffill[selected_ticker]
     feat_tmp = pd.DataFrame(index=price_series.index)
 
-    # === Add "price" column (as in label creation) ===
+    # Price column
     feat_tmp["price"] = price_series
 
     # Lag returns
@@ -153,7 +153,6 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
         feat_tmp["macd"] = np.nan
         feat_tmp["macd_signal"] = np.nan
 
-    # Moving averages
     for w in [5, 10, 20]:
         feat_tmp[f"sma_{w}"] = price_series.rolling(w).mean()
         feat_tmp[f"ema_{w}"] = price_series.ewm(span=w, adjust=False).mean()
@@ -164,7 +163,7 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
         feat_tmp["vol_change_1h"] = vol_series.pct_change()
         feat_tmp["vol_ma_24h"] = vol_series.rolling(24).mean()
 
-    # Cross-asset returns from aligned_ffill (not from all_tickers_data)
+    # Cross-asset returns
     cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
     for asset in cross_assets:
         if asset in aligned_ffill.columns:
@@ -174,11 +173,11 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
 
-    # Drop rows with NaNs for actual feature columns
+    # Drop rows with NaNs in any feature column
     drop_cols = [col for col in feat_tmp.columns if col not in ["datetime", "ticker"]]
     feat_tmp = feat_tmp.dropna(subset=drop_cols)
 
-    # Final feature column order: exactly as in your notebook X.columns
+    # Enforce column order (from your notebook's X.columns)
     missing = set(feature_columns) - set(feat_tmp.columns)
     if missing:
         st.error(f"Missing columns in features: {missing}")
@@ -194,10 +193,15 @@ def create_sequences(X, seq_len=128):
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
     try:
+        # Debug print for troubleshooting
+        print("Features columns at prediction:", features.columns.tolist())
+        print("Expected feature_columns:", feature_columns)
+        print("Feature DataFrame shape:", features.shape)
+        print(features.dtypes)
         missing = set(feature_columns) - set(features.columns)
-        if missing:
-            st.error("Missing columns in features: " + str(missing))
-            return None, None, None, None
+        extra = set(features.columns) - set(feature_columns)
+        print("Missing columns:", missing)
+        print("Extra columns:", extra)
         features = features.loc[:, feature_columns]
         features_scaled = scaler.transform(features)
         X_seq = create_sequences(features_scaled)
