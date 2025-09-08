@@ -71,15 +71,14 @@ original_cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM",
 
 dynamic_cross_assets = original_cross_assets.copy()
 
-base_feature_columns = [
-    'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
-    'vol_6h', 'vol_12h', 'vol_24h', 
-    'rsi_14', 'macd', 'macd_signal', 
-    'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20', 
-    'vol_change_1h', 'vol_ma_24h', 
-    'hour', 'day_of_week', 'price'
+# HARDCODED feature columns for scaler/model compatibility
+expected_columns = [
+    'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 'vol_6h', 'vol_12h', 'vol_24h',
+    'rsi_14', 'macd', 'macd_signal', 'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20',
+    'vol_change_1h', 'vol_ma_24h', 'AAPL_ret_1h', 'MSFT_ret_1h', 'AMZN_ret_1h', 'GOOGL_ret_1h',
+    'TSLA_ret_1h', 'NVDA_ret_1h', 'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h',
+    'BA_ret_1h', 'META_ret_1h', 'hour', 'day_of_week', 'price'
 ]
-
 SEQ_LEN = 128  # Sequence length for CNN/LSTM
 
 @st.cache_data(ttl=300)
@@ -143,8 +142,9 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp["vol_change_1h"] = 0
         feat_tmp["vol_ma_24h"] = 0
 
-    for asset in dynamic_cross_assets:
-        feat_tmp[f"{asset}_ret_1h"] = cross_data[asset].pct_change().fillna(0)
+    # Always fill all cross asset columns, even if they're missing
+    for asset in original_cross_assets:
+        feat_tmp[f"{asset}_ret_1h"] = cross_data.get(asset, pd.Series(0, index=feat_tmp.index)).pct_change().fillna(0)
 
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
@@ -154,14 +154,12 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp[col] = feat_tmp[col].fillna(0)
     feat_tmp = feat_tmp.dropna(subset=["price"])
 
-    cross_asset_features = [f"{asset}_ret_1h" for asset in dynamic_cross_assets]
-    complete_feature_columns = base_feature_columns[:-1] + cross_asset_features + [base_feature_columns[-1]]
-
-    missing = set(complete_feature_columns) - set(feat_tmp.columns)
-    for m in missing:
-        feat_tmp[m] = 0
-
-    return feat_tmp.loc[:, complete_feature_columns]
+    # HARDCODE output columns for scaler/model compatibility
+    for col in expected_columns:
+        if col not in feat_tmp.columns:
+            feat_tmp[col] = 0
+    feat_tmp = feat_tmp[expected_columns]
+    return feat_tmp
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
     """
@@ -169,6 +167,9 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
     """
     if scaler is None or cnn_model is None or lstm_model is None or xgb_model is None or meta_model is None:
         return None, None, None, None
+
+    # Always use hardcoded expected_columns
+    features = features[expected_columns]
 
     # Take the most recent SEQ_LEN + 1 rows (for sequence & tabular)
     if len(features) < SEQ_LEN:
