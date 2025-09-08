@@ -87,20 +87,21 @@ if 'performance_metrics' not in st.session_state:
 # Load models (with caching)
 @st.cache_resource
 def load_models():
-    """Load all trained models"""
+    """Load all trained models and the feature column order"""
     try:
         cnn_model = joblib.load('cnn_model.pkl')
         lstm_model = joblib.load('lstm_model.pkl')
         xgb_model = joblib.load('xgb_model.pkl')
         meta_model = joblib.load('meta_learner.pkl')
         scaler = joblib.load('scaler.pkl')
-        return cnn_model, lstm_model, xgb_model, meta_model, scaler
+        feature_columns = joblib.load('feature_columns.pkl')  # PATCH: Load column order
+        return cnn_model, lstm_model, xgb_model, meta_model, scaler, feature_columns
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
         st.error("Please ensure all model files are in the working directory.")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
-cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
+cnn_model, lstm_model, xgb_model, meta_model, scaler, feature_columns = load_models()
 
 # Sidebar for user input
 st.sidebar.header("Configuration")
@@ -153,8 +154,8 @@ def get_aligned_ffill(tickers, days_history):
     aligned_ffill = aligned_close.ffill()
     return aligned_ffill, all_data
 
-# Feature creation -- PATCH: add price column!
-def create_features(df, ticker, aligned_ffill, all_data):
+# Feature creation -- PATCH: add price column and enforce column order!
+def create_features(df, ticker, aligned_ffill, all_data, feature_columns):
     feat_tmp = pd.DataFrame(index=df.index)
     price_series = df['Close']
 
@@ -208,6 +209,14 @@ def create_features(df, ticker, aligned_ffill, all_data):
     
     # Drop rows with NaNs (as in notebook)
     feat_tmp = feat_tmp.dropna()
+
+    # PATCH: Match column order to training
+    try:
+        feat_tmp = feat_tmp.loc[:, feature_columns]  # ENSURE ORDER
+    except Exception as e:
+        st.error(f"Feature column order mismatch: {e}")
+        return pd.DataFrame()  # Return empty DataFrame if order cannot be matched
+
     return feat_tmp
 
 # Function to prepare sequence data (exactly as in notebook)
@@ -323,7 +332,7 @@ def update_prediction_results():
         st.session_state.performance_metrics['avg_return'] = total_return / len(st.session_state.prediction_log)
 
 # Main app
-if cnn_model and lstm_model and xgb_model and meta_model and scaler:
+if cnn_model and lstm_model and xgb_model and meta_model and scaler and feature_columns:
     # Update prediction results if requested
     if update_predictions:
         with st.spinner('Updating prediction results...'):
@@ -387,7 +396,7 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
             if run_prediction:
                 with st.spinner('Generating prediction...'):
                     # Create features (exactly as in notebook)
-                    features = create_features(stock_data, selected_ticker, aligned_ffill, all_tickers_data)
+                    features = create_features(stock_data, selected_ticker, aligned_ffill, all_tickers_data, feature_columns)
                     
                     if len(features) < 128:
                         st.error("Not enough historical data to generate prediction. Need at least 128 hours of data.")
@@ -568,4 +577,5 @@ else:
     - xgb_model.pkl
     - meta_learner.pkl
     - scaler.pkl
+    - feature_columns.pkl
     """)
