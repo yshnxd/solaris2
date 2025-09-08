@@ -68,7 +68,6 @@ cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 
 # Original cross assets used in training
 original_cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
-
 dynamic_cross_assets = original_cross_assets.copy()
 
 # HARDCODED feature columns for scaler/model compatibility
@@ -170,12 +169,17 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
 
     # Always use hardcoded expected_columns
     features = features[expected_columns]
+    # CLEAN FEATURES: Replace NaN/infs with 0
+    features = features.replace([np.inf, -np.inf], 0).fillna(0)
 
-    # Take the most recent SEQ_LEN + 1 rows (for sequence & tabular)
     if len(features) < SEQ_LEN:
         return None, None, None, None
     features_recent = features.iloc[-SEQ_LEN:]
     features_tabular = features.iloc[-1:]
+
+    # If you want to be extra safe, also clean these again:
+    features_recent = features_recent.replace([np.inf, -np.inf], 0).fillna(0)
+    features_tabular = features_tabular.replace([np.inf, -np.inf], 0).fillna(0)
 
     # Scale features
     X_seq = scaler.transform(features_recent)
