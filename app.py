@@ -66,29 +66,19 @@ def load_models():
 
 cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 
-# Feature column order from your notebook's X.columns.tolist()
-feature_columns = [
+# Original cross assets used in training
+original_cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
+
+# Dynamic cross assets - will be determined based on selected ticker
+dynamic_cross_assets = original_cross_assets.copy()
+
+# Define the base feature columns (without the cross-asset returns)
+base_feature_columns = [
     'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
     'vol_6h', 'vol_12h', 'vol_24h', 
     'rsi_14', 'macd', 'macd_signal', 
     'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20', 
     'vol_change_1h', 'vol_ma_24h', 
-    'AAPL_ret_1h', 'MSFT_ret_1h', 'AMZN_ret_1h', 'GOOGL_ret_1h', 'TSLA_ret_1h', 
-    'NVDA_ret_1h', 'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h', 'BA_ret_1h', 'META_ret_1h', 
-    'hour', 'day_of_week', 'price'
-]
-
-# ... [imports and configs unchanged] ...
-
-cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
-feature_columns = [
-    'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 
-    'vol_6h', 'vol_12h', 'vol_24h', 
-    'rsi_14', 'macd', 'macd_signal', 
-    'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20', 
-    'vol_change_1h', 'vol_ma_24h', 
-    'AAPL_ret_1h', 'MSFT_ret_1h', 'AMZN_ret_1h', 'GOOGL_ret_1h', 'TSLA_ret_1h', 
-    'NVDA_ret_1h', 'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h', 'BA_ret_1h', 'META_ret_1h', 
     'hour', 'day_of_week', 'price'
 ]
 
@@ -104,10 +94,18 @@ def fetch_stock_data(ticker, period="729d", interval="60m"):
     except Exception as e:
         return None
 
-def fetch_cross_assets(selected_index, days_history):
+def fetch_cross_assets(selected_index, days_history, selected_ticker):
+    # Update dynamic cross assets to exclude the selected ticker
+    global dynamic_cross_assets
+    if selected_ticker in dynamic_cross_assets:
+        dynamic_cross_assets = [a for a in original_cross_assets if a != selected_ticker]
+    else:
+        # If selected ticker is not in original list, use the first 11 from original
+        dynamic_cross_assets = original_cross_assets[:11]
+    
     # Returns a dict of cross-asset close prices aligned to selected_index
     cross_data = {}
-    for asset in cross_assets:
+    for asset in dynamic_cross_assets:
         df = fetch_stock_data(asset, period=f"{days_history}d", interval="60m")
         if df is not None and not df.empty:
             cross_data[asset] = df.reindex(selected_index)['Close'].ffill()
@@ -154,7 +152,7 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp["vol_ma_24h"] = 0
 
     # Cross-asset returns (always present, filled with 0 if missing)
-    for asset in cross_assets:
+    for asset in dynamic_cross_assets:
         feat_tmp[f"{asset}_ret_1h"] = cross_data[asset].pct_change().fillna(0)
 
     # Calendar features
@@ -169,11 +167,57 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp[col] = feat_tmp[col].fillna(0)
     feat_tmp = feat_tmp.dropna(subset=["price"])
 
-    # Enforce column order
-    missing = set(feature_columns) - set(feat_tmp.columns)
+    # Build the complete feature columns list dynamically
+    cross_asset_features = [f"{asset}_ret_1h" for asset in dynamic_cross_assets]
+    complete_feature_columns = base_feature_columns[:-1] + cross_asset_features + [base_feature_columns[-1]]
+    
+    # Ensure we have all required columns
+    missing = set(complete_feature_columns) - set(feat_tmp.columns)
     for m in missing:
         feat_tmp[m] = 0
-    return feat_tmp.loc[:, feature_columns]
+        
+    return feat_tmp.loc[:, complete_feature_columns]
+
+def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
+    # This function should implement the prediction logic
+    # For now, return dummy values
+    predicted_price = current_price * 1.01  # 1% increase as example
+    pred_change_pct = 1.0
+    votes = {"CNN": "UP", "LSTM": "UP", "XGBoost": "DOWN"}
+    confidence = 75.5
+    
+    return predicted_price, pred_change_pct, votes, confidence
+
+def update_prediction_results():
+    # This function should update the prediction results based on actual market movement
+    # For now, just update with dummy values
+    if st.session_state.prediction_log:
+        latest_pred = st.session_state.prediction_log[-1]
+        # Simulate some results
+        latest_pred["actual_price"] = latest_pred["current_price"] * (1 + np.random.uniform(-0.02, 0.03))
+        latest_pred["actual_change"] = (latest_pred["actual_price"] - latest_pred["current_price"]) / latest_pred["current_price"] * 100
+        latest_pred["correct"] = (latest_pred["predicted_change"] > 0) == (latest_pred["actual_change"] > 0)
+        
+        # Update performance metrics
+        st.session_state.performance_metrics['total_predictions'] += 1
+        if latest_pred["correct"]:
+            st.session_state.performance_metrics['correct_predictions'] += 1
+        st.session_state.performance_metrics['total_return'] += latest_pred["actual_change"]
+        st.session_state.performance_metrics['accuracy'] = (
+            st.session_state.performance_metrics['correct_predictions'] / 
+            st.session_state.performance_metrics['total_predictions'] * 100
+        )
+        st.session_state.performance_metrics['avg_return'] = (
+            st.session_state.performance_metrics['total_return'] / 
+            st.session_state.performance_metrics['total_predictions']
+        )
+
+# Sidebar inputs
+st.sidebar.header("Configuration")
+selected_ticker = st.sidebar.text_input("Stock Ticker", "AAPL").upper()
+days_history = st.sidebar.slider("Days of History", min_value=30, max_value=729, value=90)
+run_prediction = st.sidebar.button("Run Prediction")
+update_predictions = st.sidebar.button("Update Prediction Results")
 
 # ----------- MAIN APP LOGIC -----------
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
@@ -221,7 +265,7 @@ else:
         if update_predictions:
             with st.spinner('Updating prediction results...'):
                 update_prediction_results()
-        cross_data = fetch_cross_assets(main_ticker_data.index, days_history)
+        cross_data = fetch_cross_assets(main_ticker_data.index, days_history, selected_ticker)
         if run_prediction:
             with st.spinner('Generating prediction...'):
                 features = create_features_for_app(selected_ticker, main_ticker_data, cross_data)
