@@ -102,16 +102,13 @@ def fetch_stock_data(ticker, period="729d", interval="60m"):
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval=interval)
         if df.empty:
-            st.error(f"No data found for ticker {ticker}")
             return None
         df.index = pd.to_datetime(df.index).tz_localize(None)
         return df
     except Exception as e:
-        st.error(f"Error fetching data for {ticker}: {str(e)}")
         return None
 
 def get_aligned_ffill(selected_ticker, cross_assets, days_history):
-    # Always include selected_ticker in universe
     universe = set(cross_assets)
     universe.add(selected_ticker)
     all_data = {}
@@ -119,7 +116,7 @@ def get_aligned_ffill(selected_ticker, cross_assets, days_history):
         df = fetch_stock_data(t, period=f"{days_history}d", interval="60m")
         if df is not None and not df.empty:
             all_data[t] = df
-    if selected_ticker not in all_data:
+    if selected_ticker not in all_data or all_data[selected_ticker].empty:
         return None, None
     target_index = all_data[selected_ticker].index
     aligned_close = pd.DataFrame(index=target_index)
@@ -127,7 +124,6 @@ def get_aligned_ffill(selected_ticker, cross_assets, days_history):
         if t in all_data:
             aligned_close[t] = all_data[t].reindex(target_index)['Close']
         else:
-            # If cross-asset is missing, fill column with NaN
             aligned_close[t] = np.nan
     aligned_ffill = aligned_close.ffill()
     return aligned_ffill, all_data
@@ -191,10 +187,8 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
     feat_tmp["vol_ma_24h"] = feat_tmp["vol_ma_24h"].fillna(0)
     for col in ["rsi_14", "macd", "macd_signal"]:
         feat_tmp[col] = feat_tmp[col].fillna(0)
-    # Drop only rows missing price
     feat_tmp = feat_tmp.dropna(subset=["price"])
 
-    # Enforce column order
     missing = set(feature_columns) - set(feat_tmp.columns)
     if missing:
         st.error(f"Missing columns in features: {missing}")
@@ -256,6 +250,8 @@ def update_prediction_results():
             target_time = prediction_time + timedelta(hours=1)
             try:
                 stock_data = fetch_stock_data(ticker, period="2d", interval="60m")
+                if stock_data is None or stock_data.empty:
+                    continue
                 time_diff = abs(stock_data.index - target_time)
                 closest_idx = time_diff.argmin()
                 actual_price = stock_data.iloc[closest_idx]['Close']
@@ -281,49 +277,55 @@ def update_prediction_results():
         st.session_state.performance_metrics['total_return'] = total_return
         st.session_state.performance_metrics['avg_return'] = total_return / len(st.session_state.prediction_log)
 
-if cnn_model and lstm_model and xgb_model and meta_model and scaler:
-    if update_predictions:
-        with st.spinner('Updating prediction results...'):
-            update_prediction_results()
-    aligned_ffill, all_tickers_data = get_aligned_ffill(selected_ticker, cross_assets, days_history)
-    if aligned_ffill is None:
-        st.error("Not enough data for selected ticker. Try increasing days of history.")
-    else:
-        stock_data = all_tickers_data[selected_ticker]
-        if stock_data is not None and not stock_data.empty:
-            latest_data = stock_data.iloc[-1]
-            current_price = latest_data['Close']
-            current_time = latest_data.name
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Current Price", f"${current_price:.2f}")
-            with col2:
-                prev_close = stock_data.iloc[-2]['Close'] if len(stock_data) > 1 else current_price
-                change = current_price - prev_close
-                change_pct = (change / prev_close) * 100
-                st.metric("Change", f"{change:.2f}", f"{change_pct:.2f}%")
-            with col3:
-                st.metric("Last Updated", current_time.strftime("%Y-%m-%d %H:%M"))
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                               vertical_spacing=0.1, 
-                               subplot_titles=(f'{selected_ticker} Price', 'Volume'),
-                               row_width=[0.2, 0.7])
-            fig.add_trace(go.Candlestick(x=stock_data.index,
-                                         open=stock_data['Open'],
-                                         high=stock_data['High'],
-                                         low=stock_data['Low'],
-                                         close=stock_data['Close'],
-                                         name="Price"), row=1, col=1)
-            colors = ['red' if row['Open'] > row['Close'] else 'green' 
-                      for _, row in stock_data.iterrows()]
-            fig.add_trace(go.Bar(x=stock_data.index,
-                                 y=stock_data['Volume'],
-                                 marker_color=colors,
-                                 name="Volume"), row=2, col=1)
-            fig.add_vline(x=current_time, line_dash="dash", line_color="white")
-            fig.update_layout(height=600, showlegend=False, 
-                             xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
+# --- MAIN TICKER CHART AND METRICS ---
+main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
+
+if main_ticker_data is None or main_ticker_data.empty:
+    st.error(f"No data found for ticker: {selected_ticker}. Please check the symbol or try another stock.")
+else:
+    latest_data = main_ticker_data.iloc[-1]
+    current_price = latest_data['Close']
+    current_time = latest_data.name
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Current Price", f"${current_price:.2f}")
+    with col2:
+        prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
+        change = current_price - prev_close
+        change_pct = (change / prev_close) * 100
+        st.metric("Change", f"{change:.2f}", f"{change_pct:.2f}%")
+    with col3:
+        st.metric("Last Updated", current_time.strftime("%Y-%m-%d %H:%M"))
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.1, 
+                        subplot_titles=(f'{selected_ticker} Price', 'Volume'),
+                        row_width=[0.2, 0.7])
+    fig.add_trace(go.Candlestick(x=main_ticker_data.index,
+                                 open=main_ticker_data['Open'],
+                                 high=main_ticker_data['High'],
+                                 low=main_ticker_data['Low'],
+                                 close=main_ticker_data['Close'],
+                                 name="Price"), row=1, col=1)
+    colors = ['red' if row['Open'] > row['Close'] else 'green' 
+              for _, row in main_ticker_data.iterrows()]
+    fig.add_trace(go.Bar(x=main_ticker_data.index,
+                         y=main_ticker_data['Volume'],
+                         marker_color=colors,
+                         name="Volume"), row=2, col=1)
+    fig.add_vline(x=current_time, line_dash="dash", line_color="white")
+    fig.update_layout(height=600, showlegend=False, 
+                     xaxis_rangeslider_visible=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- PREDICTION PIPELINE ---
+    if cnn_model and lstm_model and xgb_model and meta_model and scaler:
+        if update_predictions:
+            with st.spinner('Updating prediction results...'):
+                update_prediction_results()
+        aligned_ffill, all_tickers_data = get_aligned_ffill(selected_ticker, cross_assets, days_history)
+        if aligned_ffill is None:
+            st.warning("Not enough data for selected ticker for feature engineering. Try increasing days of history.")
+        else:
             if run_prediction:
                 with st.spinner('Generating prediction...'):
                     features = create_features_for_app(selected_ticker, aligned_ffill, all_tickers_data)
@@ -405,58 +407,58 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
                     with col4:
                         st.metric("Avg Return", f"{avg_return:.2f}%")
                 st.dataframe(log_df, use_container_width=True)
-        st.markdown("---")
-        st.markdown("## How SOLARIS Works")
-        exp_col1, exp_col2 = st.columns(2)
-        with exp_col1:
-            st.markdown("""
-            ### Model Architecture
-            SOLARIS uses an ensemble of three different machine learning models:
-            1. **CNN (Convolutional Neural Network)**: Identifies patterns in price movements
-            2. **LSTM (Long Short-Term Memory)**: Captures sequential dependencies in time series data
-            3. **XGBoost**: Handles structured features and non-linear relationships
-            Predictions from these models are combined using a meta-learner for improved accuracy.
-            """)
-            st.markdown("### Top Predictive Features")
-            feature_importance = {
-                "Previous Hour Return": 0.18,
-                "RSI (14-period)": 0.15,
-                "MACD Signal": 0.12,
-                "Volume Change": 0.11,
-                "NVDA 1h Return": 0.09,
-                "MSFT 1h Return": 0.08,
-                "Volatility (24h)": 0.07,
-                "SMA (20-period)": 0.06,
-                "Hour of Day": 0.05,
-                "Day of Week": 0.04
-            }
-            for feature, importance in feature_importance.items():
-                st.write(f"{feature}: {importance:.0%}")
-                st.progress(importance)
-        with exp_col2:
-            st.markdown("""
-            ### Technical Details
-            - **Data Source**: Yahoo Finance API
-            - **Feature Engineering**: 34 technical indicators and cross-asset features
-            - **Sequence Length**: 128 hours (5+ days) of historical data
-            - **Training Period**: 2+ years of hourly data
-            - **Update Frequency**: Predictions are generated in real-time
-            """)
-            st.markdown("### Historical Backtest Performance")
-            st.markdown("""
-            Based on extensive backtesting, the model has achieved:
-            - **Total Return**: 239.97%
-            - **Start Capital**: $10,000.00
-            - **Final Capital**: $33,997.15
-            - **Total Trades**: 8,944
-            - **Avg Hourly PnL**: $2.68 ± $91.17
-            """)
-            st.error("""
-            **Important Disclaimer**: 
-            This tool is for educational and research purposes only. 
-            Past performance is not indicative of future results. 
-            Always conduct your own research and consider seeking advice from a qualified financial advisor before making investment decisions.
-            """)
+    st.markdown("---")
+    st.markdown("## How SOLARIS Works")
+    exp_col1, exp_col2 = st.columns(2)
+    with exp_col1:
+        st.markdown("""
+        ### Model Architecture
+        SOLARIS uses an ensemble of three different machine learning models:
+        1. **CNN (Convolutional Neural Network)**: Identifies patterns in price movements
+        2. **LSTM (Long Short-Term Memory)**: Captures sequential dependencies in time series data
+        3. **XGBoost**: Handles structured features and non-linear relationships
+        Predictions from these models are combined using a meta-learner for improved accuracy.
+        """)
+        st.markdown("### Top Predictive Features")
+        feature_importance = {
+            "Previous Hour Return": 0.18,
+            "RSI (14-period)": 0.15,
+            "MACD Signal": 0.12,
+            "Volume Change": 0.11,
+            "NVDA 1h Return": 0.09,
+            "MSFT 1h Return": 0.08,
+            "Volatility (24h)": 0.07,
+            "SMA (20-period)": 0.06,
+            "Hour of Day": 0.05,
+            "Day of Week": 0.04
+        }
+        for feature, importance in feature_importance.items():
+            st.write(f"{feature}: {importance:.0%}")
+            st.progress(importance)
+    with exp_col2:
+        st.markdown("""
+        ### Technical Details
+        - **Data Source**: Yahoo Finance API
+        - **Feature Engineering**: 34 technical indicators and cross-asset features
+        - **Sequence Length**: 128 hours (5+ days) of historical data
+        - **Training Period**: 2+ years of hourly data
+        - **Update Frequency**: Predictions are generated in real-time
+        """)
+        st.markdown("### Historical Backtest Performance")
+        st.markdown("""
+        Based on extensive backtesting, the model has achieved:
+        - **Total Return**: 239.97%
+        - **Start Capital**: $10,000.00
+        - **Final Capital**: $33,997.15
+        - **Total Trades**: 8,944
+        - **Avg Hourly PnL**: $2.68 ± $91.17
+        """)
+        st.error("""
+        **Important Disclaimer**: 
+        This tool is for educational and research purposes only. 
+        Past performance is not indicative of future results. 
+        Always conduct your own research and consider seeking advice from a qualified financial advisor before making investment decisions.
+        """)
 else:
     st.warning("""
     Models failed to load. Please ensure you have the following files in the working directory:
