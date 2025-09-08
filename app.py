@@ -78,6 +78,8 @@ feature_columns = [
     'hour', 'day_of_week', 'price'
 ]
 
+cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
+
 st.sidebar.header("Configuration")
 selected_ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL").upper()
 days_history = st.sidebar.text_input("Days of Historical Data (90-729)", value="180")
@@ -108,9 +110,12 @@ def fetch_stock_data(ticker, period="729d", interval="60m"):
         st.error(f"Error fetching data for {ticker}: {str(e)}")
         return None
 
-def get_aligned_ffill(tickers, days_history):
+def get_aligned_ffill(selected_ticker, cross_assets, days_history):
+    # Always include selected_ticker in universe
+    universe = set(cross_assets)
+    universe.add(selected_ticker)
     all_data = {}
-    for t in tickers:
+    for t in universe:
         df = fetch_stock_data(t, period=f"{days_history}d", interval="60m")
         if df is not None and not df.empty:
             all_data[t] = df
@@ -118,8 +123,11 @@ def get_aligned_ffill(tickers, days_history):
         return None, None
     target_index = all_data[selected_ticker].index
     aligned_close = pd.DataFrame(index=target_index)
-    for t, df in all_data.items():
-        aligned_close[t] = df.reindex(target_index)['Close']
+    for t in universe:
+        if t in all_data:
+            aligned_close[t] = all_data[t].reindex(target_index)['Close']
+        else:
+            aligned_close[t] = np.nan  # ensure all cross-asset columns exist
     aligned_ffill = aligned_close.ffill()
     return aligned_ffill, all_data
 
@@ -157,18 +165,22 @@ def create_features_for_app(selected_ticker, aligned_ffill, data_dict):
         vol_series = data_dict[selected_ticker].reindex(price_series.index)["Volume"].ffill()
         feat_tmp["vol_change_1h"] = vol_series.pct_change()
         feat_tmp["vol_ma_24h"] = vol_series.rolling(24).mean()
+    else:
+        feat_tmp["vol_change_1h"] = np.nan
+        feat_tmp["vol_ma_24h"] = np.nan
 
     # Cross-asset returns
-    cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
     for asset in cross_assets:
         if asset in aligned_ffill.columns:
             feat_tmp[f"{asset}_ret_1h"] = aligned_ffill[asset].pct_change()
+        else:
+            feat_tmp[f"{asset}_ret_1h"] = np.nan
 
     # Calendar features
     feat_tmp["hour"] = feat_tmp.index.hour
     feat_tmp["day_of_week"] = feat_tmp.index.dayofweek
 
-    # Price column LAST (so notebook order matches)
+    # Price column LAST (as in notebook)
     feat_tmp["price"] = price_series
 
     # Drop rows with NaNs in any feature column
@@ -191,15 +203,6 @@ def create_sequences(X, seq_len=128):
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
     try:
-        # Debug print for troubleshooting
-        print("Features columns at prediction:", features.columns.tolist())
-        print("Expected feature_columns:", feature_columns)
-        print("Feature DataFrame shape:", features.shape)
-        print(features.dtypes)
-        missing = set(feature_columns) - set(features.columns)
-        extra = set(features.columns) - set(feature_columns)
-        print("Missing columns:", missing)
-        print("Extra columns:", extra)
         features = features.loc[:, feature_columns]
         features_scaled = scaler.transform(features)
         X_seq = create_sequences(features_scaled)
@@ -275,8 +278,7 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
     if update_predictions:
         with st.spinner('Updating prediction results...'):
             update_prediction_results()
-    tickers_from_notebook = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
-    aligned_ffill, all_tickers_data = get_aligned_ffill(tickers_from_notebook, days_history)
+    aligned_ffill, all_tickers_data = get_aligned_ffill(selected_ticker, cross_assets, days_history)
     if aligned_ffill is None:
         st.error("Not enough data for selected ticker. Try increasing days of history.")
     else:
