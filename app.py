@@ -347,64 +347,65 @@ else:
                 with col4:
                     st.metric("Avg Return", f"{avg_return:.2f}%")
             st.dataframe(log_df, use_container_width=True)
-    st.markdown("---")
-    st.markdown("## How SOLARIS Works")
-    exp_col1, exp_col2 = st.columns(2)
-    with exp_col1:
-        st.markdown("""
-        ### Model Architecture
-        SOLARIS uses an ensemble of three different machine learning models:
-        1. **CNN (Convolutional Neural Network)**: Identifies patterns in price movements
-        2. **LSTM (Long Short-Term Memory)**: Captures sequential dependencies in time series data
-        3. **XGBoost**: Handles structured features and non-linear relationships
-        Predictions from these models are combined using a meta-learner for improved accuracy.
+    else:
+        st.warning("""
+        Models failed to load. Please ensure you have the following files in the working directory:
+        - cnn_model.pkl
+        - lstm_model.pkl
+        - xgb_model.pkl
+        - meta_learner.pkl
+        - scaler.pkl
         """)
-        st.markdown("### Top Predictive Features")
-        feature_importance = {
-            "Previous Hour Return": 0.18,
-            "RSI (14-period)": 0.15,
-            "MACD Signal": 0.12,
-            "Volume Change": 0.11,
-            "NVDA 1h Return": 0.09,
-            "MSFT 1h Return": 0.08,
-            "Volatility (24h)": 0.07,
-            "SMA (20-period)": 0.06,
-            "Hour of Day": 0.05,
-            "Day of Week": 0.04
-        }
-        for feature, importance in feature_importance.items():
-            st.write(f"{feature}: {importance:.0%}")
-            st.progress(importance)
-    with exp_col2:
-        st.markdown("""
-        ### Technical Details
-        - **Data Source**: Yahoo Finance API
-        - **Feature Engineering**: 34 technical indicators and cross-asset features
-        - **Sequence Length**: 128 hours (5+ days) of historical data
-        - **Training Period**: 2+ years of hourly data
-        - **Update Frequency**: Predictions are generated in real-time
-        """)
-        st.markdown("### Historical Backtest Performance")
-        st.markdown("""
-        Based on extensive backtesting, the model has achieved:
-        - **Total Return**: 239.97%
-        - **Start Capital**: $10,000.00
-        - **Final Capital**: $33,997.15
-        - **Total Trades**: 8,944
-        - **Avg Hourly PnL**: $2.68 ± $91.17
-        """)
-        st.error("""
-        **Important Disclaimer**: 
-        This tool is for educational and research purposes only. 
-        Past performance is not indicative of future results. 
-        Always conduct your own research and consider seeking advice from a qualified financial advisor before making investment decisions.
-        """)
-else:
-    st.warning("""
-    Models failed to load. Please ensure you have the following files in the working directory:
-    - cnn_model.pkl
-    - lstm_model.pkl
-    - xgb_model.pkl
-    - meta_learner.pkl
-    - scaler.pkl
+
+st.markdown("---")
+st.markdown("## How SOLARIS Works")
+exp_col1, exp_col2 = st.columns(2)
+with exp_col1:
+    st.markdown("""
+    ### Model Architecture
+    SOLARIS uses an ensemble of three different machine learning models:
+    1. **CNN (Convolutional Neural Network)**: Identifies patterns in price movements
+    2. **LSTM (Long Short-Term Memory)**: Captures sequential dependencies in time series data
+    3. **XGBoost**: Handles structured features and non-linear relationships
+    Predictions from these models are combined using a meta-learner for improved accuracy.
+    """)
+    st.markdown("### Top Predictive Features")
+    feature_importance = {
+        "Previous Hour Return": 0.18,
+        "RSI (14-period)": 0.15,
+        "MACD Signal": 0.12,
+        "Volume Change": 0.11,
+        "NVDA 1h Return": 0.09,
+        "MSFT 1h Return": 0.08,
+        "Volatility (24h)": 0.07,
+        "SMA (20-period)": 0.06,
+        "Hour of Day": 0.05,
+        "Day of Week": 0.04
+    }
+    for feature, importance in feature_importance.items():
+        st.write(f"{feature}: {importance:.0%}")
+        st.progress(importance)
+with exp_col2:
+    st.markdown("""
+    ### Technical Details
+    - **Data Source**: Yahoo Finance API
+    - **Feature Engineering**: 34 technical indicators and cross-asset features
+    - **Sequence Length**: 128 hours (5+ days) of historical data
+    - **Training Period**: 2+ years of hourly data
+    - **Update Frequency**: Predictions are generated in real-time
+    """)
+    st.markdown("### Historical Backtest Performance")
+    st.markdown("""
+    Based on extensive backtesting, the model has achieved:
+    - **Total Return**: 239.97%
+    - **Start Capital**: $10,000.00
+    - **Final Capital**: $33,997.15
+    - **Total Trades**: 8,944
+    - **Avg Hourly PnL**: $2.68 ± $91.17
+    """)
+    st.error("""
+    **Important Disclaimer**: 
+    This tool is for educational and research purposes only. 
+    Past performance is not indicative of future results. 
+    Always conduct your own research and consider seeking advice from a qualified financial advisor before making investment decisions.
     """)
