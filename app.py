@@ -95,7 +95,7 @@ run_prediction = st.sidebar.button("🚀 Predict Next Hour")
 update_predictions = st.sidebar.button("🔄 Update Prediction Results")
 
 @st.cache_data(ttl=300)
-def fetch_stock_data(ticker, period="30d", interval="60m"):
+def fetch_stock_data(ticker, period="729d", interval="60m"):
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval=interval)
