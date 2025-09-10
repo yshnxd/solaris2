@@ -152,7 +152,6 @@ cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
 original_cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
 dynamic_cross_assets = original_cross_assets.copy()
 
-# HARDCODED feature columns for scaler/model compatibility
 expected_columns = [
     'ret_1h', 'ret_3h', 'ret_6h', 'ret_12h', 'ret_24h', 'vol_6h', 'vol_12h', 'vol_24h',
     'rsi_14', 'macd', 'macd_signal', 'sma_5', 'ema_5', 'sma_10', 'ema_10', 'sma_20', 'ema_20',
@@ -160,7 +159,7 @@ expected_columns = [
     'TSLA_ret_1h', 'NVDA_ret_1h', 'JPM_ret_1h', 'JNJ_ret_1h', 'XOM_ret_1h', 'CAT_ret_1h',
     'BA_ret_1h', 'META_ret_1h', 'hour', 'day_of_week', 'price'
 ]
-SEQ_LEN = 128  # Sequence length for CNN/LSTM
+SEQ_LEN = 128
 
 @st.cache_data(ttl=300)
 def fetch_stock_data(ticker, period="729d", interval="60m"):
@@ -223,7 +222,6 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp["vol_change_1h"] = 0
         feat_tmp["vol_ma_24h"] = 0
 
-    # Always fill all cross asset columns, even if they're missing
     for asset in original_cross_assets:
         feat_tmp[f"{asset}_ret_1h"] = cross_data.get(asset, pd.Series(0, index=feat_tmp.index)).pct_change().fillna(0)
 
@@ -235,7 +233,6 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
         feat_tmp[col] = feat_tmp[col].fillna(0)
     feat_tmp = feat_tmp.dropna(subset=["price"])
 
-    # HARDCODE output columns for scaler/model compatibility
     for col in expected_columns:
         if col not in feat_tmp.columns:
             feat_tmp[col] = 0
@@ -243,15 +240,10 @@ def create_features_for_app(selected_ticker, ticker_data, cross_data):
     return feat_tmp
 
 def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model):
-    """
-    Predict using the CNN, LSTM, XGBoost and Meta Learner.
-    """
     if scaler is None or cnn_model is None or lstm_model is None or xgb_model is None or meta_model is None:
         return None, None, None, None
 
-    # Always use hardcoded expected_columns
     features = features[expected_columns]
-    # CLEAN FEATURES: Replace NaN/infs with 0
     features = features.replace([np.inf, -np.inf], 0).fillna(0)
 
     if len(features) < SEQ_LEN:
@@ -259,20 +251,15 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
     features_recent = features.iloc[-SEQ_LEN:]
     features_tabular = features.iloc[-1:]
 
-    # If you want to be extra safe, also clean these again:
     features_recent = features_recent.replace([np.inf, -np.inf], 0).fillna(0)
     features_tabular = features_tabular.replace([np.inf, -np.inf], 0).fillna(0)
 
-    # Scale features
     X_seq = scaler.transform(features_recent)
     X_tab = scaler.transform(features_tabular)
 
-    # CNN/LSTM expect (1, SEQ_LEN, n_features)
     X_seq = X_seq.reshape(1, SEQ_LEN, -1)
-    # XGBoost expects (1, n_features)
     X_tab = X_tab.reshape(1, -1)
 
-    # Predict next-hour return (not price)
     try:
         pred_cnn = cnn_model.predict(X_seq, verbose=0)
         pred_cnn = float(pred_cnn[0][0])
@@ -291,7 +278,6 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
     except Exception as e:
         pred_xgb = 0.0
 
-    # Meta learner features: base preds + stats (mean, std, max, min)
     meta_feats = np.array([pred_cnn, pred_lstm, pred_xgb])
     meta_stats = np.array([meta_feats.mean(), meta_feats.std(), meta_feats.max(), meta_feats.min()])
     meta_input = np.concatenate([meta_feats, meta_stats]).reshape(1, -1)
@@ -301,17 +287,14 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
     except Exception as e:
         pred_meta = np.mean([pred_cnn, pred_lstm, pred_xgb])
 
-    # Compute predicted price (current * (1 + pred_meta))
     predicted_price = current_price * (1 + pred_meta)
     pred_change_pct = pred_meta * 100
 
-    # Votes
     votes = {
         "CNN": "UP" if pred_cnn > 0 else "DOWN",
         "LSTM": "UP" if pred_lstm > 0 else "DOWN",
         "XGBoost": "UP" if pred_xgb > 0 else "DOWN"
     }
-    # Confidence = agreement among models, weighted by absolute returns
     agreement = [pred_cnn, pred_lstm, pred_xgb]
     up_count = sum([1 for v in agreement if v > 0])
     down_count = sum([1 for v in agreement if v < 0])
@@ -417,7 +400,6 @@ else:
                                 st.info("**SIGNAL: HOLD**")
                                 st.write("No strong directional signal detected.")
                             st.markdown('</div>', unsafe_allow_html=True)
-                        # Instead of logging just the current time, log the prediction for the next hour
                         target_time = current_time + pd.Timedelta(hours=1)
                         log_entry = {
                             "timestamp": datetime.now(),
@@ -427,7 +409,7 @@ else:
                             "predicted_change": float(pred_change_pct),
                             "confidence": float(confidence),
                             "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD",
-                            "target_time": target_time,  # the time the prediction is for
+                            "target_time": target_time,
                             "actual_price": None,
                             "error_pct": None,
                             "error_abs": None,
@@ -435,15 +417,19 @@ else:
                         }
                         append_prediction_log(log_entry)
                         st.info("Prediction logged. Later, use the 'Evaluate Predictions' button in the sidebar to fetch the actual price for that prediction time.")
+
+        # --- Evaluate and display prediction history with summary ---
         if evaluate_results:
             with st.spinner("Evaluating predictions..."):
-                evaluate_predictions()
-        # Show predictions log
+                updated_log = evaluate_predictions()
+                # Force reload from disk to update session state and UI
+                st.session_state.prediction_log = load_prediction_log()
+
+        # Always reload the log to ensure latest state for display
         log = get_prediction_log()
         if log:
             st.markdown("## Prediction History")
             log_df = pd.DataFrame(log)
-            # Safely handle missing columns and type conversions
             if "timestamp" in log_df.columns:
                 log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], errors="coerce")
             else:
@@ -457,23 +443,24 @@ else:
             else:
                 log_df['evaluated_time'] = pd.NaT
             log_df = log_df.sort_values("timestamp", ascending=False)
-            # Always create missing columns for display
             show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
             for col in show_cols:
                 if col not in log_df.columns:
                     log_df[col] = np.nan
             st.dataframe(log_df[show_cols], use_container_width=True)
-            # Show evaluation summary if available
+            # --- Summary Section ---
+            st.markdown("## Prediction Evaluation Summary")
             if 'error_pct' in log_df.columns and log_df['error_pct'].notnull().any():
                 eval_rows = log_df[log_df['error_pct'].notnull()]
                 avg_abs_error = eval_rows['error_abs'].mean()
                 avg_pct_error = eval_rows['error_pct'].mean()
                 eval_count = len(eval_rows)
-                st.markdown("## Prediction Evaluation Summary")
                 st.metric("Evaluated Predictions", eval_count)
                 st.metric("Average Absolute Error", f"${avg_abs_error:.3f}")
                 st.metric("Average % Error", f"{avg_pct_error:.2f}%")
                 st.progress(min(1, max(0, 1-avg_pct_error/10)))  # visual bar: 0% error = full bar, 10%+ = empty
+            else:
+                st.info("No predictions have been evaluated yet. Press the 'Evaluate Predictions' button after the target time has passed to fetch actual prices.")
     else:
         st.warning("""
         Models failed to load. Please ensure you have the following files in the working directory:
