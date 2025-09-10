@@ -45,29 +45,38 @@ and XGBoost with a Meta Learner Ensemble for short-term stock market predictions
 # Persistent log file
 PREDICTION_LOG_FILE = "prediction_history.json"
 
+def convert_all_datetimes(obj):
+    if isinstance(obj, dict):
+        return {k: convert_all_datetimes(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_all_datetimes(x) for x in obj]
+    elif isinstance(obj, (datetime, pd.Timestamp)):
+        return obj.strftime("%Y-%m-%d %H:%M")
+    else:
+        return obj
+
+def save_prediction_log(log):
+    log_save = convert_all_datetimes(log)
+    with open(PREDICTION_LOG_FILE, "w") as f:
+        json.dump(log_save, f, indent=2)
+
 def load_prediction_log():
     if os.path.exists(PREDICTION_LOG_FILE):
         with open(PREDICTION_LOG_FILE, "r") as f:
             try:
                 log = json.load(f)
-                # convert timestamp str to datetime
+                # convert timestamp str to datetime, and target_time/evaluated_time if present
                 for entry in log:
-                    entry["timestamp"] = pd.to_datetime(entry["timestamp"])
+                    if "timestamp" in entry and entry["timestamp"]:
+                        entry["timestamp"] = pd.to_datetime(entry["timestamp"])
+                    if "target_time" in entry and entry["target_time"]:
+                        entry["target_time"] = pd.to_datetime(entry["target_time"])
+                    if "evaluated_time" in entry and entry["evaluated_time"]:
+                        entry["evaluated_time"] = pd.to_datetime(entry["evaluated_time"])
                 return log
             except Exception:
                 return []
     return []
-
-def save_prediction_log(log):
-    # convert datetime to str for saving
-    log_save = []
-    for entry in log:
-        save_entry = entry.copy()
-        if isinstance(save_entry["timestamp"], (datetime, pd.Timestamp)):
-            save_entry["timestamp"] = save_entry["timestamp"].strftime("%Y-%m-%d %H:%M")
-        log_save.append(save_entry)
-    with open(PREDICTION_LOG_FILE, "w") as f:
-        json.dump(log_save, f, indent=2)
 
 def get_prediction_log():
     if "prediction_log" not in st.session_state:
@@ -88,10 +97,12 @@ def evaluate_predictions():
     log = get_prediction_log()
     to_update = []
     for entry in log:
-        if "actual_price" not in entry:
-            # fetch actual price for the stock at the predicted time (or the closest available after)
-            ticker = entry["ticker"]
-            timestamp = entry["target_time"]
+        if "actual_price" not in entry or entry["actual_price"] is None or (isinstance(entry["actual_price"], float) and np.isnan(entry["actual_price"])):
+            ticker = entry.get("ticker", None)
+            timestamp = entry.get("target_time", None)
+            if ticker is None or timestamp is None:
+                to_update.append(False)
+                continue
             try:
                 stock = yf.Ticker(ticker)
                 # Pull a window of 4 hours after the prediction time in 60m interval to get the closes
@@ -101,7 +112,6 @@ def evaluate_predictions():
                     interval="60m"
                 )
                 if not df.empty:
-                    # Find the row at or after target_time
                     actual_row = df[df.index >= timestamp]
                     if not actual_row.empty:
                         actual_price = float(actual_row.iloc[0]['Close'])
@@ -111,7 +121,6 @@ def evaluate_predictions():
                         entry["evaluated_time"] = str(actual_row.index[0])
                         to_update.append(True)
                     else:
-                        # can't evaluate yet
                         to_update.append(False)
                 else:
                     to_update.append(False)
@@ -409,7 +418,6 @@ else:
                                 st.write("No strong directional signal detected.")
                             st.markdown('</div>', unsafe_allow_html=True)
                         # Instead of logging just the current time, log the prediction for the next hour
-                        # Find the next hour available in the fetched data
                         target_time = current_time + pd.Timedelta(hours=1)
                         log_entry = {
                             "timestamp": datetime.now(),
@@ -419,7 +427,11 @@ else:
                             "predicted_change": float(pred_change_pct),
                             "confidence": float(confidence),
                             "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD",
-                            "target_time": target_time  # the time the prediction is for
+                            "target_time": target_time,  # the time the prediction is for
+                            "actual_price": None,
+                            "error_pct": None,
+                            "error_abs": None,
+                            "evaluated_time": None
                         }
                         append_prediction_log(log_entry)
                         st.info("Prediction logged. Later, use the 'Evaluate Predictions' button in the sidebar to fetch the actual price for that prediction time.")
@@ -431,17 +443,28 @@ else:
         if log:
             st.markdown("## Prediction History")
             log_df = pd.DataFrame(log)
-            log_df['timestamp'] = pd.to_datetime(log_df['timestamp'])
-            log_df['target_time'] = pd.to_datetime(log_df['target_time'])
+            # Safely handle missing columns and type conversions
+            if "timestamp" in log_df.columns:
+                log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], errors="coerce")
+            else:
+                log_df['timestamp'] = pd.NaT
+            if "target_time" in log_df.columns:
+                log_df['target_time'] = pd.to_datetime(log_df['target_time'], errors="coerce")
+            else:
+                log_df['target_time'] = pd.NaT
+            if "evaluated_time" in log_df.columns:
+                log_df['evaluated_time'] = pd.to_datetime(log_df['evaluated_time'], errors="coerce")
+            else:
+                log_df['evaluated_time'] = pd.NaT
             log_df = log_df.sort_values("timestamp", ascending=False)
-            # Format columns for display
+            # Always create missing columns for display
             show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
             for col in show_cols:
                 if col not in log_df.columns:
                     log_df[col] = np.nan
             st.dataframe(log_df[show_cols], use_container_width=True)
-            # Show summary of prediction error statistics (only on evaluated)
-            if log_df['error_pct'].notnull().any():
+            # Show evaluation summary if available
+            if 'error_pct' in log_df.columns and log_df['error_pct'].notnull().any():
                 eval_rows = log_df[log_df['error_pct'].notnull()]
                 avg_abs_error = eval_rows['error_abs'].mean()
                 avg_pct_error = eval_rows['error_pct'].mean()
