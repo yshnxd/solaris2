@@ -104,54 +104,27 @@ def evaluate_predictions():
                 to_update.append(False)
                 continue
             try:
-                # Round to nearest hour (up) for compatibility with Yahoo's closes
-                if isinstance(timestamp, str):
-                    timestamp = pd.to_datetime(timestamp)
-                rounded_time = timestamp.replace(minute=0, second=0, microsecond=0)
-                if timestamp.minute > 0 or timestamp.second > 0:
-                    rounded_time += pd.Timedelta(hours=1)
                 stock = yf.Ticker(ticker)
+                # Pull a window of 4 hours after the prediction time in 60m interval to get the closes
                 df = stock.history(
-                    start=(rounded_time - pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
-                    end=(rounded_time + pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                    start=(timestamp - pd.Timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                    end=(timestamp + pd.Timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"),
                     interval="60m"
                 )
-                # Find the close at the rounded_time
                 if not df.empty:
-                    # Try exact match
-                    if rounded_time in df.index:
-                        actual_price = float(df.loc[rounded_time]['Close'])
+                    actual_row = df[df.index >= timestamp]
+                    if not actual_row.empty:
+                        actual_price = float(actual_row.iloc[0]['Close'])
                         entry["actual_price"] = actual_price
                         entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
                         entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
-                        entry["evaluated_time"] = str(rounded_time)
+                        entry["evaluated_time"] = str(actual_row.index[0])
                         to_update.append(True)
                     else:
-                        # Otherwise, find the closest after rounded_time
-                        after = df[df.index >= rounded_time]
-                        before = df[df.index <= rounded_time]
-                        if not after.empty:
-                            closest = after.iloc[0]
-                            actual_price = float(closest['Close'])
-                            entry["actual_price"] = actual_price
-                            entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
-                            entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
-                            entry["evaluated_time"] = str(after.index[0])
-                            to_update.append(True)
-                        elif not before.empty:
-                            # fallback: take the last close before rounded_time
-                            closest = before.iloc[-1]
-                            actual_price = float(closest['Close'])
-                            entry["actual_price"] = actual_price
-                            entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
-                            entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
-                            entry["evaluated_time"] = str(before.index[-1])
-                            to_update.append(True)
-                        else:
-                            to_update.append(False)
+                        to_update.append(False)
                 else:
                     to_update.append(False)
-            except Exception as ex:
+            except Exception:
                 to_update.append(False)
         else:
             to_update.append(False)
