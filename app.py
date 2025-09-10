@@ -107,6 +107,7 @@ def evaluate_predictions():
                 # Align timestamp to next hour (matching Yahoo closes)
                 if isinstance(timestamp, str):
                     timestamp = pd.to_datetime(timestamp)
+                # Always round up to the next full HOUR to match Yahoo
                 rounded_time = timestamp.replace(minute=0, second=0, microsecond=0)
                 if timestamp.minute > 0 or timestamp.second > 0:
                     rounded_time += pd.Timedelta(hours=1)
@@ -442,8 +443,8 @@ else:
                                 st.info("**SIGNAL: HOLD**")
                                 st.write("No strong directional signal detected.")
                             st.markdown('</div>', unsafe_allow_html=True)
-                        # Instead of logging just the current time, log the prediction for the next hour
-                        target_time = current_time + pd.Timedelta(hours=1)
+                        # Always round up to the next full hour for target_time (Yahoo close alignment)
+                        target_time = (current_time + pd.Timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
                         log_entry = {
                             "timestamp": datetime.now(),
                             "ticker": selected_ticker,
@@ -452,14 +453,14 @@ else:
                             "predicted_change": float(pred_change_pct),
                             "confidence": float(confidence),
                             "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD",
-                            "target_time": target_time,  # the time the prediction is for
+                            "target_time": target_time,
                             "actual_price": None,
                             "error_pct": None,
                             "error_abs": None,
                             "evaluated_time": None
                         }
                         append_prediction_log(log_entry)
-                        st.info("Prediction logged. Later, use the 'Evaluate Predictions' button in the sidebar to fetch the actual price for that prediction time.")
+                        st.info(f"Prediction logged for {selected_ticker} at {current_time}. Next hour target_time is {target_time}. Use the 'Evaluate Predictions' button in the sidebar to fetch the actual price for that prediction time.")
         if evaluate_results:
             with st.spinner("Evaluating predictions..."):
                 evaluate_predictions()
