@@ -8,6 +8,8 @@ import joblib
 import ta
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime, timedelta
+import os
+import json
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -40,15 +42,86 @@ and XGBoost with a Meta Learner Ensemble for short-term stock market predictions
 *Note: This is for educational and research purposes only - not financial advice.*
 """)
 
-if 'prediction_log' not in st.session_state:
-    st.session_state.prediction_log = []
-if 'performance_metrics' not in st.session_state:
-    st.session_state.performance_metrics = {
-        'total_predictions': 0,
-        'correct_predictions': 0,
-        'total_return': 0,
-        'accuracy': 0
-    }
+# Persistent log file
+PREDICTION_LOG_FILE = "prediction_history.json"
+
+def load_prediction_log():
+    if os.path.exists(PREDICTION_LOG_FILE):
+        with open(PREDICTION_LOG_FILE, "r") as f:
+            try:
+                log = json.load(f)
+                # convert timestamp str to datetime
+                for entry in log:
+                    entry["timestamp"] = pd.to_datetime(entry["timestamp"])
+                return log
+            except Exception:
+                return []
+    return []
+
+def save_prediction_log(log):
+    # convert datetime to str for saving
+    log_save = []
+    for entry in log:
+        save_entry = entry.copy()
+        if isinstance(save_entry["timestamp"], (datetime, pd.Timestamp)):
+            save_entry["timestamp"] = save_entry["timestamp"].strftime("%Y-%m-%d %H:%M")
+        log_save.append(save_entry)
+    with open(PREDICTION_LOG_FILE, "w") as f:
+        json.dump(log_save, f, indent=2)
+
+def get_prediction_log():
+    if "prediction_log" not in st.session_state:
+        st.session_state.prediction_log = load_prediction_log()
+    return st.session_state.prediction_log
+
+def append_prediction_log(entry):
+    log = get_prediction_log()
+    log.append(entry)
+    save_prediction_log(log)
+    st.session_state.prediction_log = log
+
+def update_prediction_log(log):
+    save_prediction_log(log)
+    st.session_state.prediction_log = log
+
+def evaluate_predictions():
+    log = get_prediction_log()
+    to_update = []
+    for entry in log:
+        if "actual_price" not in entry:
+            # fetch actual price for the stock at the predicted time (or the closest available after)
+            ticker = entry["ticker"]
+            timestamp = entry["target_time"]
+            try:
+                stock = yf.Ticker(ticker)
+                # Pull a window of 4 hours after the prediction time in 60m interval to get the closes
+                df = stock.history(
+                    start=(timestamp - pd.Timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                    end=(timestamp + pd.Timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"),
+                    interval="60m"
+                )
+                if not df.empty:
+                    # Find the row at or after target_time
+                    actual_row = df[df.index >= timestamp]
+                    if not actual_row.empty:
+                        actual_price = float(actual_row.iloc[0]['Close'])
+                        entry["actual_price"] = actual_price
+                        entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
+                        entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
+                        entry["evaluated_time"] = str(actual_row.index[0])
+                        to_update.append(True)
+                    else:
+                        # can't evaluate yet
+                        to_update.append(False)
+                else:
+                    to_update.append(False)
+            except Exception:
+                to_update.append(False)
+        else:
+            to_update.append(False)
+    if any(to_update):
+        update_prediction_log(log)
+    return log
 
 @st.cache_resource
 def load_models():
@@ -237,30 +310,11 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
 
     return predicted_price, pred_change_pct, votes, confidence
 
-def update_prediction_results():
-    if st.session_state.prediction_log:
-        latest_pred = st.session_state.prediction_log[-1]
-        latest_pred["actual_price"] = latest_pred["current_price"] * (1 + np.random.uniform(-0.02, 0.03))
-        latest_pred["actual_change"] = (latest_pred["actual_price"] - latest_pred["current_price"]) / latest_pred["current_price"] * 100
-        latest_pred["correct"] = (latest_pred["predicted_change"] > 0) == (latest_pred["actual_change"] > 0)
-        st.session_state.performance_metrics['total_predictions'] += 1
-        if latest_pred["correct"]:
-            st.session_state.performance_metrics['correct_predictions'] += 1
-        st.session_state.performance_metrics['total_return'] += latest_pred["actual_change"]
-        st.session_state.performance_metrics['accuracy'] = (
-            st.session_state.performance_metrics['correct_predictions'] / 
-            st.session_state.performance_metrics['total_predictions'] * 100
-        )
-        st.session_state.performance_metrics['avg_return'] = (
-            st.session_state.performance_metrics['total_return'] / 
-            st.session_state.performance_metrics['total_predictions']
-        )
-
 st.sidebar.header("Configuration")
 selected_ticker = st.sidebar.text_input("Stock Ticker", "AAPL").upper()
 days_history = st.sidebar.slider("Days of History", min_value=30, max_value=729, value=90)
 run_prediction = st.sidebar.button("Run Prediction")
-update_predictions = st.sidebar.button("Update Prediction Results")
+evaluate_results = st.sidebar.button("Evaluate Predictions (fetch actual prices)")
 
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
@@ -302,9 +356,6 @@ else:
     st.plotly_chart(fig, use_container_width=True)
 
     if cnn_model and lstm_model and xgb_model and meta_model and scaler:
-        if update_predictions:
-            with st.spinner('Updating prediction results...'):
-                update_prediction_results()
         cross_data = fetch_cross_assets(main_ticker_data.index, days_history, selected_ticker)
         if run_prediction:
             with st.spinner('Generating prediction...'):
@@ -325,7 +376,7 @@ else:
                         pred_col1, pred_col2, pred_col3 = st.columns(3)
                         with pred_col1:
                             st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                            st.metric("Predicted Price", f"${predicted_price:.2f}", 
+                            st.metric("Predicted Price (next hour)", f"${predicted_price:.2f}", 
                                      f"{pred_change_pct:.2f}%")
                             st.markdown('</div>', unsafe_allow_html=True)
                         with pred_col2:
@@ -357,36 +408,49 @@ else:
                                 st.info("**SIGNAL: HOLD**")
                                 st.write("No strong directional signal detected.")
                             st.markdown('</div>', unsafe_allow_html=True)
-                        prediction_time = datetime.now()
+                        # Instead of logging just the current time, log the prediction for the next hour
+                        # Find the next hour available in the fetched data
+                        target_time = current_time + pd.Timedelta(hours=1)
                         log_entry = {
-                            "timestamp": prediction_time.strftime("%Y-%m-%d %H:%M"),
+                            "timestamp": datetime.now(),
                             "ticker": selected_ticker,
-                            "current_price": current_price,
-                            "predicted_price": predicted_price,
-                            "predicted_change": pred_change_pct,
-                            "confidence": confidence,
-                            "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD"
+                            "current_price": float(current_price),
+                            "predicted_price": float(predicted_price),
+                            "predicted_change": float(pred_change_pct),
+                            "confidence": float(confidence),
+                            "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD",
+                            "target_time": target_time  # the time the prediction is for
                         }
-                        st.session_state.prediction_log.append(log_entry)
-                        st.info("Prediction logged. Use the 'Update Prediction Results' button in the sidebar to check actual results after market hours.")
-        if st.session_state.prediction_log:
+                        append_prediction_log(log_entry)
+                        st.info("Prediction logged. Later, use the 'Evaluate Predictions' button in the sidebar to fetch the actual price for that prediction time.")
+        if evaluate_results:
+            with st.spinner("Evaluating predictions..."):
+                evaluate_predictions()
+        # Show predictions log
+        log = get_prediction_log()
+        if log:
             st.markdown("## Prediction History")
-            log_df = pd.DataFrame(st.session_state.prediction_log)
-            if 'correct' in log_df.columns:
-                accuracy = st.session_state.performance_metrics['accuracy']
-                total_return = st.session_state.performance_metrics['total_return']
-                avg_return = st.session_state.performance_metrics['avg_return']
-                st.markdown("### Real-Time Performance")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Total Predictions", st.session_state.performance_metrics['total_predictions'])
-                with col2:
-                    st.metric("Accuracy", f"{accuracy:.1f}%")
-                with col3:
-                    st.metric("Total Return", f"{total_return:.2f}%")
-                with col4:
-                    st.metric("Avg Return", f"{avg_return:.2f}%")
-            st.dataframe(log_df, use_container_width=True)
+            log_df = pd.DataFrame(log)
+            log_df['timestamp'] = pd.to_datetime(log_df['timestamp'])
+            log_df['target_time'] = pd.to_datetime(log_df['target_time'])
+            log_df = log_df.sort_values("timestamp", ascending=False)
+            # Format columns for display
+            show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
+            for col in show_cols:
+                if col not in log_df.columns:
+                    log_df[col] = np.nan
+            st.dataframe(log_df[show_cols], use_container_width=True)
+            # Show summary of prediction error statistics (only on evaluated)
+            if log_df['error_pct'].notnull().any():
+                eval_rows = log_df[log_df['error_pct'].notnull()]
+                avg_abs_error = eval_rows['error_abs'].mean()
+                avg_pct_error = eval_rows['error_pct'].mean()
+                eval_count = len(eval_rows)
+                st.markdown("## Prediction Evaluation Summary")
+                st.metric("Evaluated Predictions", eval_count)
+                st.metric("Average Absolute Error", f"${avg_abs_error:.3f}")
+                st.metric("Average % Error", f"{avg_pct_error:.2f}%")
+                st.progress(min(1, max(0, 1-avg_pct_error/10)))  # visual bar: 0% error = full bar, 10%+ = empty
     else:
         st.warning("""
         Models failed to load. Please ensure you have the following files in the working directory:
