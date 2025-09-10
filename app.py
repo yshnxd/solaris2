@@ -104,27 +104,52 @@ def evaluate_predictions():
                 to_update.append(False)
                 continue
             try:
+                # Align timestamp to next hour (matching Yahoo closes)
+                if isinstance(timestamp, str):
+                    timestamp = pd.to_datetime(timestamp)
+                rounded_time = timestamp.replace(minute=0, second=0, microsecond=0)
+                if timestamp.minute > 0 or timestamp.second > 0:
+                    rounded_time += pd.Timedelta(hours=1)
                 stock = yf.Ticker(ticker)
-                # Pull a window of 4 hours after the prediction time in 60m interval to get the closes
                 df = stock.history(
-                    start=(timestamp - pd.Timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
-                    end=(timestamp + pd.Timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"),
+                    start=(rounded_time - pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                    end=(rounded_time + pd.Timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
                     interval="60m"
                 )
                 if not df.empty:
-                    actual_row = df[df.index >= timestamp]
-                    if not actual_row.empty:
-                        actual_price = float(actual_row.iloc[0]['Close'])
+                    # Try exact match
+                    if rounded_time in df.index:
+                        actual_price = float(df.loc[rounded_time]['Close'])
                         entry["actual_price"] = actual_price
                         entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
                         entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
-                        entry["evaluated_time"] = str(actual_row.index[0])
+                        entry["evaluated_time"] = str(rounded_time)
                         to_update.append(True)
                     else:
-                        to_update.append(False)
+                        # Find the next available time after rounded_time, or last before
+                        after = df[df.index > rounded_time]
+                        before = df[df.index < rounded_time]
+                        if not after.empty:
+                            idx = after.index[0]
+                            actual_price = float(after.loc[idx]['Close'])
+                            entry["actual_price"] = actual_price
+                            entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
+                            entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
+                            entry["evaluated_time"] = str(idx)
+                            to_update.append(True)
+                        elif not before.empty:
+                            idx = before.index[-1]
+                            actual_price = float(before.loc[idx]['Close'])
+                            entry["actual_price"] = actual_price
+                            entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
+                            entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
+                            entry["evaluated_time"] = str(idx)
+                            to_update.append(True)
+                        else:
+                            to_update.append(False)
                 else:
                     to_update.append(False)
-            except Exception:
+            except Exception as ex:
                 to_update.append(False)
         else:
             to_update.append(False)
