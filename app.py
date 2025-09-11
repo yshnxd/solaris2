@@ -603,3 +603,4 @@ with exp_col2:
     **Important Disclaimer**: 
     This tool is for educational and research purposes only. 
     Past performance is not indicative of future
+    """)
