@@ -443,8 +443,8 @@ else:
                                 st.info("**SIGNAL: HOLD**")
                                 st.write("No strong directional signal detected.")
                             st.markdown('</div>', unsafe_allow_html=True)
-                        # Always round up to the next full hour for target_time (Yahoo close alignment)
-                        target_time = (current_time + pd.Timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                        # Set target_time to exactly 1 hour after current timestamp (no rounding)
+                        target_time = current_time + pd.Timedelta(hours=1)
                         log_entry = {
                             "timestamp": datetime.now(),
                             "ticker": selected_ticker,
@@ -510,6 +510,49 @@ else:
         - scaler.pkl
         """)
 
+# --- HISTORY PREDICTION SECTION ---
+st.markdown("## History Prediction")
+try:
+    # Load solaris-data.csv (assumes file is in working directory)
+    solaris_csv_path = "solaris-data.csv"
+    if os.path.exists(solaris_csv_path):
+        hist_df = pd.read_csv(solaris_csv_path)
+        
+        # Convert timestamps to datetime for better display
+        for col in ["timestamp", "target_time"]:
+            if col in hist_df.columns:
+                hist_df[col] = pd.to_datetime(hist_df[col], errors="coerce")
+        if "evaluated_time" in hist_df.columns:
+            hist_df["evaluated_time"] = pd.to_datetime(hist_df["evaluated_time"], errors="coerce")
+        
+        # Sort by timestamp descending
+        hist_df = hist_df.sort_values("timestamp", ascending=False)
+
+        # Display the full table (can limit columns if desired)
+        display_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_abs", "error_pct", "confidence", "signal"]
+        for col in display_cols:
+            if col not in hist_df.columns:
+                hist_df[col] = np.nan
+        st.dataframe(hist_df[display_cols], use_container_width=True)
+
+        # Summary metrics
+        valid_rows = hist_df.dropna(subset=["error_abs", "error_pct"])
+        avg_abs_error = valid_rows["error_abs"].mean() if not valid_rows.empty else float("nan")
+        avg_pct_error = valid_rows["error_pct"].mean() if not valid_rows.empty else float("nan")
+        count = len(valid_rows)
+
+        st.markdown("### Backtest Summary")
+        st.metric("Evaluated Predictions", count)
+        st.metric("Average Absolute Error", f"${avg_abs_error:.3f}" if count else "N/A")
+        st.metric("Average % Error", f"{avg_pct_error:.2f}%" if count else "N/A")
+        st.progress(min(1, max(0, 1-avg_pct_error/10)) if count else 0)
+    else:
+        st.warning("No solaris-data.csv file found for history prediction results.")
+except Exception as e:
+    st.error(f"Error loading history prediction data: {str(e)}")
+
+# --- END HISTORY PREDICTION SECTION ---
+
 st.markdown("---")
 st.markdown("## How SOLARIS Works")
 exp_col1, exp_col2 = st.columns(2)
@@ -559,6 +602,4 @@ with exp_col2:
     st.error("""
     **Important Disclaimer**: 
     This tool is for educational and research purposes only. 
-    Past performance is not indicative of future results. 
-    Always conduct your own research and consider seeking advice from a qualified financial advisor before making investment decisions.
-    """)
+    Past performance is not indicative of future
