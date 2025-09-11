@@ -527,7 +527,7 @@ else:
                 if updated_df is not None:
                     st.success("Filled actual prices and updated prediction history CSV.")
         # Show predictions log from CSV
-        if os.path.exists(prediction_history.csv):
+        if os.path.exists(PREDICTION_HISTORY_CSV):
             st.markdown("## Prediction History (CSV)")
             log_df = pd.read_csv(PREDICTION_HISTORY_CSV)
             # Safely handle missing columns and type conversions
