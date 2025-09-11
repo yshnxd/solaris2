@@ -541,7 +541,7 @@ try:
         avg_pct_error = valid_rows["error_pct"].mean() if not valid_rows.empty else float("nan")
         count = len(valid_rows)
 
-        st.markdown("### Backtest Summary")
+        st.markdown("### Prediction History Summary")
         st.metric("Evaluated Predictions", count)
         st.metric("Average Absolute Error", f"${avg_abs_error:.3f}" if count else "N/A")
         st.metric("Average % Error", f"{avg_pct_error:.2f}%" if count else "N/A")
