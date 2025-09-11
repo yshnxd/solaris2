@@ -10,8 +10,6 @@ from sklearn.preprocessing import StandardScaler
 from datetime import datetime, timedelta
 import os
 import json
-import math
-import time
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -46,7 +44,6 @@ and XGBoost with a Meta Learner Ensemble for short-term stock market predictions
 
 # Persistent log file
 PREDICTION_LOG_FILE = "prediction_history.json"
-PREDICTION_HISTORY_CSV = "prediction_history.csv"
 
 def convert_all_datetimes(obj):
     if isinstance(obj, dict):
@@ -96,120 +93,70 @@ def update_prediction_log(log):
     save_prediction_log(log)
     st.session_state.prediction_log = log
 
-def compute_signal(predicted, actual, buy_threshold_pct=0.25, sell_threshold_pct=0.25):
-    try:
-        predicted = float(predicted)
-        actual = float(actual)
-    except Exception:
-        return "HOLD"
-    if actual == 0 or math.isnan(actual):
-        return "HOLD"
-    pct = (predicted - actual) / actual * 100.0
-    if pct >= buy_threshold_pct:
-        return "BUY"
-    if pct <= -sell_threshold_pct:
-        return "SELL"
-    return "HOLD"
-
-def batch_evaluate_predictions_csv(csv_path, rate_limit_sec=0.5, hour_fetch_period="730d"):
-    # Load CSV & parse timestamps as UTC
-    if not os.path.exists(csv_path):
-        st.warning(f"{csv_path} not found.")
-        return None
-    df = pd.read_csv(csv_path)
-    for col in ['timestamp', 'target_time']:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce', utc=True)
-
-    # Ensure columns
-    for col in ['actual_price', 'error_pct', 'error_abs', 'signal']:
-        if col not in df.columns:
-            df[col] = np.nan
-    df['signal'] = df['signal'].fillna('HOLD')
-
-    # Group indices by ticker
-    ticker_groups = {}
-    for idx, row in df.iterrows():
-        t = str(row.get('ticker','')).strip()
-        if t=="" or pd.isna(row.get('target_time')):
-            continue
-        ticker_groups.setdefault(t, []).append(idx)
-
-    for j, (ticker, indices) in enumerate(ticker_groups.items(), start=1):
-        yf_ticker = ticker
-        try:
-            tk = yf.Ticker(yf_ticker)
-            hist_hour = tk.history(period=hour_fetch_period, interval='1h', actions=False, auto_adjust=False)
-            if isinstance(hist_hour.index, pd.DatetimeIndex):
-                if hist_hour.index.tz is None:
-                    hist_hour.index = hist_hour.index.tz_localize('UTC')
-                else:
-                    hist_hour.index = hist_hour.index.tz_convert('UTC')
-        except Exception:
-            hist_hour = None
-
-        try:
-            hist_day = tk.history(period='365d', interval='1d', actions=False, auto_adjust=False)
-            if isinstance(hist_day.index, pd.DatetimeIndex):
-                if hist_day.index.tz is None:
-                    hist_day.index = hist_day.index.tz_localize('UTC')
-                else:
-                    hist_day.index = hist_day.index.tz_convert('UTC')
-        except Exception:
-            hist_day = None
-
-        for i in indices:
-            t_utc = df.at[i, 'target_time']
-            if pd.isna(t_utc):
+def evaluate_predictions():
+    log = get_prediction_log()
+    to_update = []
+    for entry in log:
+        if "actual_price" not in entry or entry["actual_price"] is None or (isinstance(entry["actual_price"], float) and np.isnan(entry["actual_price"])):
+            ticker = entry.get("ticker", None)
+            timestamp = entry.get("target_time", None)
+            if ticker is None or timestamp is None:
+                to_update.append(False)
                 continue
-            if not pd.isna(df.at[i, 'actual_price']):
-                continue
-
-            filled = False
-            if hist_hour is not None and len(hist_hour) > 0:
-                target_hour = t_utc.floor('H')
-                if target_hour in hist_hour.index:
-                    close_val = float(hist_hour.loc[target_hour]['Close'])
-                    df.at[i, 'actual_price'] = close_val
-                    filled = True
+            try:
+                # Align timestamp to next hour (matching Yahoo closes)
+                if isinstance(timestamp, str):
+                    timestamp = pd.to_datetime(timestamp)
+                # Always round up to the next full HOUR to match Yahoo
+                rounded_time = timestamp.replace(minute=0, second=0, microsecond=0)
+                if timestamp.minute > 0 or timestamp.second > 0:
+                    rounded_time += pd.Timedelta(hours=1)
+                stock = yf.Ticker(ticker)
+                df = stock.history(
+                    start=(rounded_time - pd.Timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S"),
+                    end=(rounded_time + pd.Timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+                    interval="60m"
+                )
+                if not df.empty:
+                    # Try exact match
+                    if rounded_time in df.index:
+                        actual_price = float(df.loc[rounded_time]['Close'])
+                        entry["actual_price"] = actual_price
+                        entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
+                        entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
+                        entry["evaluated_time"] = str(rounded_time)
+                        to_update.append(True)
+                    else:
+                        # Find the next available time after rounded_time, or last before
+                        after = df[df.index > rounded_time]
+                        before = df[df.index < rounded_time]
+                        if not after.empty:
+                            idx = after.index[0]
+                            actual_price = float(after.loc[idx]['Close'])
+                            entry["actual_price"] = actual_price
+                            entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
+                            entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
+                            entry["evaluated_time"] = str(idx)
+                            to_update.append(True)
+                        elif not before.empty:
+                            idx = before.index[-1]
+                            actual_price = float(before.loc[idx]['Close'])
+                            entry["actual_price"] = actual_price
+                            entry["error_pct"] = abs(entry["predicted_price"] - actual_price) / actual_price * 100
+                            entry["error_abs"] = abs(entry["predicted_price"] - actual_price)
+                            entry["evaluated_time"] = str(idx)
+                            to_update.append(True)
+                        else:
+                            to_update.append(False)
                 else:
-                    diffs = (hist_hour.index - t_utc).total_seconds()
-                    best_idx = np.abs(diffs).argmin()
-                    close_val = float(hist_hour.iloc[best_idx]['Close'])
-                    df.at[i, 'actual_price'] = close_val
-                    filled = True
-
-                if filled:
-                    try:
-                        predicted = float(df.at[i, 'predicted_price'])
-                        if not math.isnan(predicted) and close_val != 0:
-                            df.at[i, 'error_pct'] = (close_val - predicted) / close_val * 100.0
-                            df.at[i, 'error_abs'] = abs(close_val - predicted)
-                    except Exception:
-                        pass
-                    df.at[i, 'signal'] = compute_signal(df.at[i, 'predicted_price'], close_val)
-
-            if not filled:
-                if hist_day is not None and len(hist_day) > 0:
-                    target_date = t_utc.normalize()
-                    candidate = hist_day.loc[hist_day.index <= target_date]
-                    if candidate is None or len(candidate) == 0:
-                        candidate = hist_day
-                    close_val = float(candidate.iloc[-1]['Close'])
-                    df.at[i, 'actual_price'] = close_val
-                    try:
-                        predicted = float(df.at[i, 'predicted_price'])
-                        if not math.isnan(predicted) and close_val != 0:
-                            df.at[i, 'error_pct'] = (close_val - predicted) / close_val * 100.0
-                            df.at[i, 'error_abs'] = abs(close_val - predicted)
-                    except Exception:
-                        pass
-                    df.at[i, 'signal'] = compute_signal(df.at[i, 'predicted_price'], close_val)
-
-        time.sleep(rate_limit_sec)
-    # Save updated file
-    df.to_csv(csv_path, index=False)
-    return df
+                    to_update.append(False)
+            except Exception as ex:
+                to_update.append(False)
+        else:
+            to_update.append(False)
+    if any(to_update):
+        update_prediction_log(log)
+    return log
 
 @st.cache_resource
 def load_models():
@@ -402,7 +349,7 @@ st.sidebar.header("Configuration")
 selected_ticker = st.sidebar.text_input("Stock Ticker", "AAPL").upper()
 days_history = st.sidebar.slider("Days of History", min_value=30, max_value=729, value=90)
 run_prediction = st.sidebar.button("Run Prediction")
-evaluate_results = st.sidebar.button("Evaluate Predictions (fill actual prices in history CSV)")
+evaluate_results = st.sidebar.button("Evaluate Predictions (fetch actual prices)")
 
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
@@ -498,8 +445,7 @@ else:
                             st.markdown('</div>', unsafe_allow_html=True)
                         # Set target_time to exactly 1 hour after current timestamp (no rounding)
                         target_time = current_time + pd.Timedelta(hours=1)
-                        # --- LOG TO CSV for backtest/fill use ---
-                        csv_row = {
+                        log_entry = {
                             "timestamp": datetime.now(),
                             "ticker": selected_ticker,
                             "current_price": float(current_price),
@@ -508,33 +454,36 @@ else:
                             "confidence": float(confidence),
                             "signal": "BUY" if pred_change_pct > 0.5 else "SELL" if pred_change_pct < -0.5 else "HOLD",
                             "target_time": target_time,
-                            "actual_price": np.nan,
-                            "error_pct": np.nan,
-                            "error_abs": np.nan,
+                            "actual_price": None,
+                            "error_pct": None,
+                            "error_abs": None,
+                            "evaluated_time": None
                         }
-                        # Append to CSV file (prediction_history.csv)
-                        if os.path.exists(PREDICTION_HISTORY_CSV):
-                            df_log = pd.read_csv(PREDICTION_HISTORY_CSV)
-                            df_log = pd.concat([df_log, pd.DataFrame([csv_row])], ignore_index=True)
-                        else:
-                            df_log = pd.DataFrame([csv_row])
-                        # Save
-                        df_log.to_csv(PREDICTION_HISTORY_CSV, index=False)
-                        st.info(f"Prediction logged to {PREDICTION_HISTORY_CSV}. Next hour target_time is {target_time}. Use the 'Evaluate Predictions' button in the sidebar to fill in actual prices for the predictions.")
+                        append_prediction_log(log_entry)
+                        st.info(f"Prediction logged for {selected_ticker} at {current_time}. Next hour target_time is {target_time}. Use the 'Evaluate Predictions' button in the sidebar to fetch the actual price for that prediction time.")
         if evaluate_results:
-            with st.spinner("Evaluating prediction history and filling actuals..."):
-                updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
-                if updated_df is not None:
-                    st.success("Filled actual prices and updated prediction history CSV.")
-        # Show predictions log from CSV
-        if os.path.exists(PREDICTION_HISTORY_CSV):
-            st.markdown("## Prediction History (CSV)")
-            log_df = pd.read_csv(PREDICTION_HISTORY_CSV)
+            with st.spinner("Evaluating predictions..."):
+                evaluate_predictions()
+        # Show predictions log
+        log = get_prediction_log()
+        if log:
+            st.markdown("## Prediction History")
+            log_df = pd.DataFrame(log)
             # Safely handle missing columns and type conversions
-            for col in ["timestamp", "target_time"]:
-                if col in log_df.columns:
-                    log_df[col] = pd.to_datetime(log_df[col], errors="coerce")
+            if "timestamp" in log_df.columns:
+                log_df['timestamp'] = pd.to_datetime(log_df['timestamp'], errors="coerce")
+            else:
+                log_df['timestamp'] = pd.NaT
+            if "target_time" in log_df.columns:
+                log_df['target_time'] = pd.to_datetime(log_df['target_time'], errors="coerce")
+            else:
+                log_df['target_time'] = pd.NaT
+            if "evaluated_time" in log_df.columns:
+                log_df['evaluated_time'] = pd.to_datetime(log_df['evaluated_time'], errors="coerce")
+            else:
+                log_df['evaluated_time'] = pd.NaT
             log_df = log_df.sort_values("timestamp", ascending=False)
+            # Always create missing columns for display
             show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
             for col in show_cols:
                 if col not in log_df.columns:
@@ -546,11 +495,11 @@ else:
                 avg_abs_error = eval_rows['error_abs'].mean()
                 avg_pct_error = eval_rows['error_pct'].mean()
                 eval_count = len(eval_rows)
-                st.markdown("### Predictions Summary")
+                st.markdown("## Prediction Evaluation Summary")
                 st.metric("Evaluated Predictions", eval_count)
-                st.metric("Average Absolute Error", f"${avg_abs_error:.3f}" if eval_count else "N/A")
-                st.metric("Average % Error", f"{avg_pct_error:.2f}%" if eval_count else "N/A")
-                st.progress(min(1, max(0, 1-avg_pct_error/10)) if eval_count else 0)
+                st.metric("Average Absolute Error", f"${avg_abs_error:.3f}")
+                st.metric("Average % Error", f"{avg_pct_error:.2f}%")
+                st.progress(min(1, max(0, 1-avg_pct_error/10)))  # visual bar: 0% error = full bar, 10%+ = empty
     else:
         st.warning("""
         Models failed to load. Please ensure you have the following files in the working directory:
@@ -560,6 +509,49 @@ else:
         - meta_learner.pkl
         - scaler.pkl
         """)
+
+# --- HISTORY PREDICTION SECTION ---
+st.markdown("## History Prediction")
+try:
+    # Load solaris-data.csv (assumes file is in working directory)
+    solaris_csv_path = "solaris-data.csv"
+    if os.path.exists(solaris_csv_path):
+        hist_df = pd.read_csv(solaris_csv_path)
+        
+        # Convert timestamps to datetime for better display
+        for col in ["timestamp", "target_time"]:
+            if col in hist_df.columns:
+                hist_df[col] = pd.to_datetime(hist_df[col], errors="coerce")
+        if "evaluated_time" in hist_df.columns:
+            hist_df["evaluated_time"] = pd.to_datetime(hist_df["evaluated_time"], errors="coerce")
+        
+        # Sort by timestamp descending
+        hist_df = hist_df.sort_values("timestamp", ascending=False)
+
+        # Display the full table (can limit columns if desired)
+        display_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_abs", "error_pct", "confidence", "signal"]
+        for col in display_cols:
+            if col not in hist_df.columns:
+                hist_df[col] = np.nan
+        st.dataframe(hist_df[display_cols], use_container_width=True)
+
+        # Summary metrics
+        valid_rows = hist_df.dropna(subset=["error_abs", "error_pct"])
+        avg_abs_error = valid_rows["error_abs"].mean() if not valid_rows.empty else float("nan")
+        avg_pct_error = valid_rows["error_pct"].mean() if not valid_rows.empty else float("nan")
+        count = len(valid_rows)
+
+        st.markdown("### Backtest Summary")
+        st.metric("Evaluated Predictions", count)
+        st.metric("Average Absolute Error", f"${avg_abs_error:.3f}" if count else "N/A")
+        st.metric("Average % Error", f"{avg_pct_error:.2f}%" if count else "N/A")
+        st.progress(min(1, max(0, 1-avg_pct_error/10)) if count else 0)
+    else:
+        st.warning("No solaris-data.csv file found for history prediction results.")
+except Exception as e:
+    st.error(f"Error loading history prediction data: {str(e)}")
+
+# --- END HISTORY PREDICTION SECTION ---
 
 st.markdown("---")
 st.markdown("## How SOLARIS Works")
@@ -611,4 +603,3 @@ with exp_col2:
     **Important Disclaimer**: 
     This tool is for educational and research purposes only. 
     Past performance is not indicative of future
-    """)
