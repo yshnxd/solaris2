@@ -1,1 +1,1 @@
-
+0,timestamp,ticker,current_price,predicted_price,target_time,actual_price,error_pct,error_abs,confidence,signal,timestamp_parsed,target_time_parsed
