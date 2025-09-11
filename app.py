@@ -602,4 +602,4 @@ with exp_col2:
     st.error("""
     **Important Disclaimer**: 
     This tool is for educational and research purposes only. 
-    Past performance is not indicative of future
+    Past performance is not indicative of future""")
