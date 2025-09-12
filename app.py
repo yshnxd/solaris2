@@ -450,7 +450,7 @@ else:
             st.progress(min(1, max(0, 1-avg_pct_error/10)) if eval_count else 0)
 
 # --- HISTORY PREDICTION (SOLARIS) SECTION ---
-st.markdown("## History Prediction (SOLARIS Backtest Data)")
+st.markdown("## History Prediction Summary")
 solaris_csv_path = "solaris-data.csv"
 if os.path.exists(solaris_csv_path):
     hist_df = pd.read_csv(solaris_csv_path)
