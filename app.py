@@ -396,10 +396,7 @@ else:
                                  high=main_ticker_data['High'],
                                  low=main_ticker_data['Low'],
                                  close=main_ticker_data['Close'],
-        name="Price",
-        increasing=dict(line=dict(color="#2ecc71")),
-        decreasing=dict(line=dict(color="#e74c3c")),
-        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Open: %{open:.2f}<br>High: %{high:.2f}<br>Low: %{low:.2f}<br>Close: %{close:.2f}<extra>Price</extra>"
+        name="Price"
     ), row=price_row, col=1)
     overlay_map = {
         "SMA 5": (sma_5, "SMA 5", "#7f7f7f", "dash", "SMA"),
