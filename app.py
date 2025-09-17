@@ -392,17 +392,13 @@ else:
     # Price + overlays
     fig.add_trace(go.Candlestick(
         x=main_ticker_data.index,
-        open=main_ticker_data['Open'],
-        high=main_ticker_data['High'],
-        low=main_ticker_data['Low'],
-        close=main_ticker_data['Close'],
+                                 open=main_ticker_data['Open'],
+                                 high=main_ticker_data['High'],
+                                 low=main_ticker_data['Low'],
+                                 close=main_ticker_data['Close'],
         name="Price",
-        increasing_line_color="#2ecc71",
-        increasing_fillcolor="rgba(0,0,0,0)",
-        decreasing_line_color="#e74c3c",
-        decreasing_fillcolor="rgba(231,76,60,0.15)",
-        hoverinfo="x+y",
-        hovertext=None,
+        increasing=dict(line=dict(color="#2ecc71"), fillcolor="rgba(0,0,0,0)"),
+        decreasing=dict(line=dict(color="#e74c3c"), fillcolor="rgba(231,76,60,0.15)"),
         hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Open: %{open:.2f}<br>High: %{high:.2f}<br>Low: %{low:.2f}<br>Close: %{close:.2f}<extra>Price</extra>"
     ), row=price_row, col=1)
     overlay_map = {
