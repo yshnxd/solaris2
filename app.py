@@ -308,6 +308,17 @@ run_prediction = st.sidebar.button("Run Prediction")
 evaluate_results = st.sidebar.button("Evaluate Predictions (fill actual prices in history CSV)")
 run_watchlist = st.sidebar.button("Run Watchlist Predictions (12 tickers)")
 
+# Indicator toggles
+st.sidebar.markdown("---")
+st.sidebar.subheader("Chart Indicators")
+overlay_options = st.sidebar.multiselect(
+    "Price Overlays",
+    ["SMA 5", "SMA 10", "SMA 20", "EMA 5", "EMA 10", "EMA 20"],
+    default=["SMA 20"]
+)
+show_rsi = st.sidebar.checkbox("Show RSI (14)", value=False)
+show_macd = st.sidebar.checkbox("Show MACD", value=False)
+
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
 if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
@@ -326,24 +337,102 @@ else:
         st.metric("Change", f"{change:.2f}", f"{change_pct:.2f}%")
     with col3:
         st.metric("Last Updated", current_time.strftime("%Y-%m-%d %H:%M"))
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                        vertical_spacing=0.1, 
-                        subplot_titles=(f'{selected_ticker} Price', 'Volume'),
-                        row_width=[0.2, 0.7])
+    # Compute indicators for plotting
+    close_series = main_ticker_data['Close']
+    sma_5 = close_series.rolling(5).mean() if len(close_series) >= 5 else None
+    sma_10 = close_series.rolling(10).mean() if len(close_series) >= 10 else None
+    sma_20 = close_series.rolling(20).mean() if len(close_series) >= 20 else None
+    ema_5 = close_series.ewm(span=5, adjust=False).mean() if len(close_series) >= 5 else None
+    ema_10 = close_series.ewm(span=10, adjust=False).mean() if len(close_series) >= 10 else None
+    ema_20 = close_series.ewm(span=20, adjust=False).mean() if len(close_series) >= 20 else None
+    try:
+        rsi_14 = ta.momentum.RSIIndicator(close_series, window=14).rsi() if show_rsi else None
+    except Exception:
+        rsi_14 = None
+    try:
+        macd_obj = ta.trend.MACD(close_series) if show_macd else None
+        macd_line = macd_obj.macd() if macd_obj is not None else None
+        macd_signal = macd_obj.macd_signal() if macd_obj is not None else None
+        macd_hist = macd_obj.macd_diff() if macd_obj is not None else None
+    except Exception:
+        macd_line = macd_signal = macd_hist = None
+
+    # Dynamic subplot layout: Price, optional RSI, optional MACD, Volume
+    extra_rows = (1 if show_rsi else 0) + (1 if show_macd else 0)
+    total_rows = 2 + extra_rows
+    subplot_titles = [f'{selected_ticker} Price']
+    if show_rsi:
+        subplot_titles.append('RSI (14)')
+    if show_macd:
+        subplot_titles.append('MACD')
+    subplot_titles.append('Volume')
+    # Row widths: put more height on price; smaller on indicators and volume
+    row_width = []
+    # Build from bottom to top as Plotly expects
+    # Start with Volume
+    row_width.append(0.2)
+    # Add MACD if used
+    if show_macd:
+        row_width.append(0.25)
+    # Add RSI if used
+    if show_rsi:
+        row_width.append(0.25)
+    # Finally price
+    row_width.append(0.7)
+    fig = make_subplots(rows=total_rows, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.06,
+                        subplot_titles=tuple(subplot_titles),
+                        row_width=row_width)
+    # Row indices
+    price_row = 1
+    vol_row = total_rows
+    rsi_row = 2 if show_rsi else None
+    macd_row = (3 if show_rsi else 2) if show_macd else None
+
+    # Price + overlays
     fig.add_trace(go.Candlestick(x=main_ticker_data.index,
                                  open=main_ticker_data['Open'],
                                  high=main_ticker_data['High'],
                                  low=main_ticker_data['Low'],
                                  close=main_ticker_data['Close'],
-                                 name="Price"), row=1, col=1)
+                                 name="Price"), row=price_row, col=1)
+    overlay_map = {
+        "SMA 5": (sma_5, "SMA 5", "#ff7f0e"),
+        "SMA 10": (sma_10, "SMA 10", "#2ca02c"),
+        "SMA 20": (sma_20, "SMA 20", "#9467bd"),
+        "EMA 5": (ema_5, "EMA 5", "#8c564b"),
+        "EMA 10": (ema_10, "EMA 10", "#e377c2"),
+        "EMA 20": (ema_20, "EMA 20", "#17becf"),
+    }
+    for key in overlay_options:
+        series, label, color = overlay_map.get(key, (None, None, None))
+        if series is not None:
+            fig.add_trace(go.Scatter(x=series.index, y=series, name=label, mode='lines', line=dict(color=color, width=1.5)), row=price_row, col=1)
+
+    # RSI subplot
+    if show_rsi and rsi_row is not None and rsi_14 is not None:
+        fig.add_trace(go.Scatter(x=rsi_14.index, y=rsi_14, name='RSI (14)', mode='lines', line=dict(color='#1f77b4', width=1.5)), row=rsi_row, col=1)
+        # 30/70 lines
+        fig.add_hline(y=70, line_dash="dot", line_color="#e74c3c", row=rsi_row, col=1)
+        fig.add_hline(y=30, line_dash="dot", line_color="#2ecc71", row=rsi_row, col=1)
+
+    # MACD subplot
+    if show_macd and macd_row is not None and macd_line is not None:
+        if macd_hist is not None:
+            fig.add_trace(go.Bar(x=macd_hist.index, y=macd_hist, name='MACD Hist', marker_color=['#2ecc71' if v >= 0 else '#e74c3c' for v in macd_hist.fillna(0)]), row=macd_row, col=1)
+        fig.add_trace(go.Scatter(x=macd_line.index, y=macd_line, name='MACD', mode='lines', line=dict(color='#1f77b4', width=1.5)), row=macd_row, col=1)
+        if macd_signal is not None:
+            fig.add_trace(go.Scatter(x=macd_signal.index, y=macd_signal, name='Signal', mode='lines', line=dict(color='#ff7f0e', width=1.2)), row=macd_row, col=1)
+
+    # Volume subplot (always)
     colors = ['red' if row['Open'] > row['Close'] else 'green' 
               for _, row in main_ticker_data.iterrows()]
     fig.add_trace(go.Bar(x=main_ticker_data.index,
                          y=main_ticker_data['Volume'],
                          marker_color=colors,
-                         name="Volume"), row=2, col=1)
-    fig.add_vline(x=current_time, line_dash="dash", line_color="white")
-    fig.update_layout(height=600, showlegend=False, 
+                         name="Volume"), row=vol_row, col=1)
+    fig.add_vline(x=current_time, line_dash="dash", line_color="white", row=price_row, col=1)
+    fig.update_layout(height=700 if extra_rows else 600, showlegend=True, 
                      xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
