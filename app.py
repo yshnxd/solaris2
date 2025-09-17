@@ -349,11 +349,7 @@ else:
 
     if cnn_model and lstm_model and xgb_model and meta_model and scaler:
         cross_data = fetch_cross_assets(main_ticker_data.index, days_history, selected_ticker)
-        # Main-page quick action for watchlist
-        top_col1, top_col2 = st.columns([1,1])
-        with top_col1:
-            run_watchlist_main = st.button("Run Watchlist Predictions (12 tickers)")
-        run_watchlist_triggered = run_watchlist or ('run_watchlist_main' in locals() and run_watchlist_main)
+        run_watchlist_triggered = run_watchlist
         if run_prediction:
             with st.spinner('Generating prediction...'):
                 features = create_features_for_app(selected_ticker, main_ticker_data, cross_data)
@@ -428,13 +424,15 @@ else:
                         st.info(f"Prediction logged to {PREDICTION_HISTORY_CSV}. Next hour target_time is {target_time}. Use the 'Evaluate Predictions' button in the sidebar to fill in actual prices for the predictions.")
         if run_watchlist_triggered:
             with st.spinner('Running watchlist predictions...'):
-                results = []
+                ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
+                appended = 0
                 for tk in original_cross_assets:
                     df_tk = fetch_stock_data(tk, period=f"{days_history}d", interval="60m")
                     if df_tk is None or df_tk.empty or len(df_tk) < SEQ_LEN:
                         continue
                     latest_tk = df_tk.iloc[-1]
                     current_price_tk = latest_tk['Close']
+                    current_time_tk = latest_tk.name
                     cross_tk = fetch_cross_assets(df_tk.index, days_history, tk)
                     feats_tk = create_features_for_app(tk, df_tk, cross_tk)
                     if len(feats_tk) < SEQ_LEN:
@@ -444,24 +442,31 @@ else:
                     )
                     if pred_price_tk is None:
                         continue
-                    signal_tk = (
-                        "BUY" if pred_change_pct_tk > 0.5 else "SELL" if pred_change_pct_tk < -0.5 else "HOLD"
-                    )
-                    results.append({
+                    signal_tk = "BUY" if pred_change_pct_tk > 0.5 else "SELL" if pred_change_pct_tk < -0.5 else "HOLD"
+                    target_time_tk = current_time_tk + pd.Timedelta(hours=1)
+                    csv_row = {
+                        "timestamp": datetime.now(),
                         "ticker": tk,
                         "current_price": float(current_price_tk),
                         "predicted_price": float(pred_price_tk),
-                        "predicted_change_pct": float(pred_change_pct_tk),
                         "confidence": float(conf_tk),
                         "signal": signal_tk,
-                    })
-                if len(results) == 0:
+                        "target_time": target_time_tk,
+                        "actual_price": np.nan,
+                        "error_pct": np.nan,
+                        "error_abs": np.nan,
+                    }
+                    if os.path.exists(PREDICTION_HISTORY_CSV):
+                        df_log = pd.read_csv(PREDICTION_HISTORY_CSV)
+                        df_log = pd.concat([df_log, pd.DataFrame([csv_row])], ignore_index=True)
+                    else:
+                        df_log = pd.DataFrame([csv_row])
+                    df_log.to_csv(PREDICTION_HISTORY_CSV, index=False)
+                    appended += 1
+                if appended == 0:
                     st.warning("No watchlist predictions could be generated (insufficient data).")
                 else:
-                    res_df = pd.DataFrame(results)
-                    res_df = res_df.sort_values(["signal", "predicted_change_pct", "confidence"], ascending=[True, False, False])
-                    st.markdown("## Watchlist Predictions")
-                    st.dataframe(res_df, use_container_width=True)
+                    st.success(f"Appended {appended} watchlist predictions to {PREDICTION_HISTORY_CSV}. See the History Prediction table below.")
         if evaluate_results:
             with st.spinner("Evaluating prediction history and filling actuals..."):
                 updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
