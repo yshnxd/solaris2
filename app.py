@@ -378,9 +378,9 @@ else:
     if show_rsi:
         row_width.append(0.25)
     # Finally price
-    row_width.append(0.7)
+    row_width.append(0.8)
     fig = make_subplots(rows=total_rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.06,
+                        vertical_spacing=0.09,
                         subplot_titles=tuple(subplot_titles),
                         row_width=row_width)
     # Row indices
@@ -390,50 +390,100 @@ else:
     macd_row = (3 if show_rsi else 2) if show_macd else None
 
     # Price + overlays
-    fig.add_trace(go.Candlestick(x=main_ticker_data.index,
-                                 open=main_ticker_data['Open'],
-                                 high=main_ticker_data['High'],
-                                 low=main_ticker_data['Low'],
-                                 close=main_ticker_data['Close'],
-                                 name="Price"), row=price_row, col=1)
+    fig.add_trace(go.Candlestick(
+        x=main_ticker_data.index,
+        open=main_ticker_data['Open'],
+        high=main_ticker_data['High'],
+        low=main_ticker_data['Low'],
+        close=main_ticker_data['Close'],
+        name="Price",
+        increasing_line_color="#2ecc71",
+        increasing_fillcolor="rgba(0,0,0,0)",
+        decreasing_line_color="#e74c3c",
+        decreasing_fillcolor="rgba(231,76,60,0.15)",
+        hoverinfo="x+y",
+        hovertext=None,
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Open: %{open:.2f}<br>High: %{high:.2f}<br>Low: %{low:.2f}<br>Close: %{close:.2f}<extra>Price</extra>"
+    ), row=price_row, col=1)
     overlay_map = {
-        "SMA 5": (sma_5, "SMA 5", "#ff7f0e"),
-        "SMA 10": (sma_10, "SMA 10", "#2ca02c"),
-        "SMA 20": (sma_20, "SMA 20", "#9467bd"),
-        "EMA 5": (ema_5, "EMA 5", "#8c564b"),
-        "EMA 10": (ema_10, "EMA 10", "#e377c2"),
-        "EMA 20": (ema_20, "EMA 20", "#17becf"),
+        "SMA 5": (sma_5, "SMA 5", "#7f7f7f", "dash", "SMA"),
+        "SMA 10": (sma_10, "SMA 10", "#b0b0b0", "dash", "SMA"),
+        "SMA 20": (sma_20, "SMA 20", "#c7c7c7", "dash", "SMA"),
+        "EMA 5": (ema_5, "EMA 5", "#ffbb78", "dot", "EMA"),
+        "EMA 10": (ema_10, "EMA 10", "#aec7e8", "dot", "EMA"),
+        "EMA 20": (ema_20, "EMA 20", "#c5b0d5", "dot", "EMA"),
     }
     for key in overlay_options:
-        series, label, color = overlay_map.get(key, (None, None, None))
+        series, label, color, dash, group = overlay_map.get(key, (None, None, None, None, None))
         if series is not None:
-            fig.add_trace(go.Scatter(x=series.index, y=series, name=label, mode='lines', line=dict(color=color, width=1.5)), row=price_row, col=1)
+            fig.add_trace(go.Scatter(
+                x=series.index,
+                y=series,
+                name=label,
+                mode='lines',
+                line=dict(color=color, width=1.2, dash=dash),
+                legendgroup=group,
+                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>"+label+": %{y:.2f}<extra></extra>"
+            ), row=price_row, col=1)
 
     # RSI subplot
     if show_rsi and rsi_row is not None and rsi_14 is not None:
-        fig.add_trace(go.Scatter(x=rsi_14.index, y=rsi_14, name='RSI (14)', mode='lines', line=dict(color='#1f77b4', width=1.5)), row=rsi_row, col=1)
-        # 30/70 lines
+        # Shaded zones: green band 30-70, light red outside (0-30 and 70-100)
+        fig.add_hrect(y0=30, y1=70, fillcolor="rgba(46, 204, 113, 0.08)", line_width=0, row=rsi_row, col=1)
+        fig.add_hrect(y0=70, y1=100, fillcolor="rgba(231, 76, 60, 0.06)", line_width=0, row=rsi_row, col=1)
+        fig.add_hrect(y0=0, y1=30, fillcolor="rgba(231, 76, 60, 0.06)", line_width=0, row=rsi_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=rsi_14.index, y=rsi_14, name='RSI (14)', mode='lines',
+            line=dict(color='#1f77b4', width=1.4),
+            hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>RSI: %{y:.2f}<extra></extra>"
+        ), row=rsi_row, col=1)
+        # 30/70 guide lines
         fig.add_hline(y=70, line_dash="dot", line_color="#e74c3c", row=rsi_row, col=1)
         fig.add_hline(y=30, line_dash="dot", line_color="#2ecc71", row=rsi_row, col=1)
 
     # MACD subplot
     if show_macd and macd_row is not None and macd_line is not None:
         if macd_hist is not None:
-            fig.add_trace(go.Bar(x=macd_hist.index, y=macd_hist, name='MACD Hist', marker_color=['#2ecc71' if v >= 0 else '#e74c3c' for v in macd_hist.fillna(0)]), row=macd_row, col=1)
-        fig.add_trace(go.Scatter(x=macd_line.index, y=macd_line, name='MACD', mode='lines', line=dict(color='#1f77b4', width=1.5)), row=macd_row, col=1)
+            fig.add_trace(go.Bar(
+                x=macd_hist.index,
+                y=macd_hist,
+                name='MACD Hist',
+                marker_color=['#2ecc71' if v >= 0 else '#e74c3c' for v in macd_hist.fillna(0)],
+                opacity=0.5,
+                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Hist: %{y:.4f}<extra></extra>"
+            ), row=macd_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=macd_line.index, y=macd_line, name='MACD', mode='lines',
+            line=dict(color='#1f77b4', width=1.4),
+            hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>MACD: %{y:.4f}<extra></extra>"
+        ), row=macd_row, col=1)
         if macd_signal is not None:
-            fig.add_trace(go.Scatter(x=macd_signal.index, y=macd_signal, name='Signal', mode='lines', line=dict(color='#ff7f0e', width=1.2)), row=macd_row, col=1)
+            fig.add_trace(go.Scatter(
+                x=macd_signal.index, y=macd_signal, name='Signal', mode='lines',
+                line=dict(color='#ff7f0e', width=1.2, dash='dot'),
+                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Signal: %{y:.4f}<extra></extra>"
+            ), row=macd_row, col=1)
 
     # Volume subplot (always)
-    colors = ['red' if row['Open'] > row['Close'] else 'green' 
+    colors = ['rgba(231,76,60,0.45)' if row['Open'] > row['Close'] else 'rgba(46,204,113,0.45)'
               for _, row in main_ticker_data.iterrows()]
     fig.add_trace(go.Bar(x=main_ticker_data.index,
                          y=main_ticker_data['Volume'],
                          marker_color=colors,
-                         name="Volume"), row=vol_row, col=1)
-    fig.add_vline(x=current_time, line_dash="dash", line_color="white", row=price_row, col=1)
-    fig.update_layout(height=700 if extra_rows else 600, showlegend=True, 
-                     xaxis_rangeslider_visible=False)
+                         name="Volume",
+                         hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Vol: %{y:.0f}<extra>Volume</extra>"), row=vol_row, col=1)
+    fig.add_vline(x=current_time, line_dash="dash", line_color="rgba(255,255,255,0.5)", row=price_row, col=1)
+    fig.update_layout(
+        height=760 if extra_rows else 620,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0, groupclick='toggleitem'),
+        hovermode='x unified',
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=40, r=20, t=40, b=40)
+    )
+    # Fix RSI range for clarity
+    if show_rsi and rsi_row is not None:
+        fig.update_yaxes(range=[0, 100], row=rsi_row, col=1)
     st.plotly_chart(fig, use_container_width=True)
 
     if cnn_model and lstm_model and xgb_model and meta_model and scaler:
