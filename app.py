@@ -712,11 +712,12 @@ else:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("""
+        current_price_formatted = f"${current_price:.2f}"
+        st.markdown(f"""
         <div class="glass-card metric-card">
             <div style="text-align: center;">
                 <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem;" class="neon-glow">
-                    ${current_price:.2f}
+                    {current_price_formatted}
                 </div>
                 <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
                     💰 Current Price
@@ -731,15 +732,17 @@ else:
         change_pct = (change / prev_close) * 100
         change_color = "#00ff88" if change >= 0 else "#ff6b6b"
         change_icon = "📈" if change >= 0 else "📉"
+        change_formatted = f"{change:+.2f}"
+        change_pct_formatted = f"{change_pct:+.2f}%"
         
         st.markdown(f"""
         <div class="glass-card metric-card">
             <div style="text-align: center;">
                 <div style="font-size: 2rem; font-weight: 900; color: {change_color}; margin-bottom: 0.5rem;" class="neon-glow">
-                    {change_icon} {change:.2f}
+                    {change_icon} {change_formatted}
                 </div>
                 <div style="font-size: 1.3rem; color: {change_color}; font-weight: 700; margin-bottom: 0.5rem;">
-                    {change_pct:+.2f}%
+                    {change_pct_formatted}
                 </div>
                 <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
                     ⚡ Price Change
@@ -964,16 +967,18 @@ else:
                         with pred_col1:
                             pred_color = "#00ff88" if pred_change_pct > 0 else "#ff6b6b"
                             pred_icon = "🚀" if pred_change_pct > 1 else "📈" if pred_change_pct > 0 else "📉" if pred_change_pct < -1 else "📊"
+                            predicted_price_formatted = f"${predicted_price:.2f}"
+                            pred_change_pct_formatted = f"{pred_change_pct:+.2f}%"
                             
                             st.markdown(f"""
                             <div class="glass-card prediction-card pulse">
                                 <div style="text-align: center;">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">{pred_icon}</div>
                                     <div style="font-size: 2.5rem; font-weight: 900; color: {pred_color}; margin-bottom: 0.5rem;" class="neon-glow">
-                                        ${predicted_price:.2f}
+                                        {predicted_price_formatted}
                                     </div>
                                     <div style="font-size: 1.5rem; color: {pred_color}; font-weight: 700; margin-bottom: 1rem;">
-                                        {pred_change_pct:+.2f}%
+                                        {pred_change_pct_formatted}
                                     </div>
                                     <div style="font-size: 1.2rem; color: rgba(255, 255, 255, 0.9); font-weight: 600;">
                                         🎯 Predicted Price (1 Hour)
