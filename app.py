@@ -17,32 +17,380 @@ warnings.filterwarnings("ignore")
 
 st.set_page_config(
     page_title="SOLARIS: AI Stock Prediction",
-    page_icon="📈",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-    .main-header { font-size: 3rem; color: #1f77b4; text-align: center; margin-bottom: 0.5rem; }
-    .sub-header { font-size: 1.5rem; color: #7f7f7f; text-align: center; margin-bottom: 2rem; }
-    .prediction-card { background-color: #f0f2f6; border-radius: 0.5rem; padding: 1.5rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); margin-bottom: 1.5rem; }
-    .metric-card { background-color: white; border-radius: 0.5rem; padding: 1rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; }
-    .positive { color: #2ecc71; }
-    .negative { color: #e74c3c; }
-    .stProgress > div > div > div > div { background-color: #1f77b4; }
-    .log-table { font-size: 0.8rem; }
+    /* Import Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    
+    /* Global Styles */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 1400px;
+    }
+    
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(45deg, #764ba2 0%, #667eea 100%);
+    }
+    
+    /* Animated Background */
+    body {
+        background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #f5576c, #4facfe, #00f2fe);
+        background-size: 400% 400%;
+        animation: gradientShift 15s ease infinite;
+        font-family: 'Inter', sans-serif;
+    }
+    
+    @keyframes gradientShift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    /* Glassmorphism Effect */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+    }
+    
+    .glass-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    
+    /* Main Header */
+    .main-header {
+        font-size: 4rem;
+        font-weight: 900;
+        background: linear-gradient(45deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-align: center;
+        margin-bottom: 0.5rem;
+        text-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
+        animation: glow 2s ease-in-out infinite alternate;
+    }
+    
+    @keyframes glow {
+        from { filter: drop-shadow(0 0 20px rgba(102, 126, 234, 0.5)); }
+        to { filter: drop-shadow(0 0 30px rgba(118, 75, 162, 0.8)); }
+    }
+    
+    .sub-header {
+        font-size: 1.8rem;
+        color: rgba(255, 255, 255, 0.9);
+        text-align: center;
+        margin-bottom: 3rem;
+        font-weight: 300;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Prediction Cards */
+    .prediction-card {
+        background: rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        margin-bottom: 2rem;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .prediction-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+        transition: left 0.5s;
+    }
+    
+    .prediction-card:hover::before {
+        left: 100%;
+    }
+    
+    .prediction-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    
+    /* Metric Cards */
+    .metric-card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 15px;
+        padding: 1.5rem;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        transition: all 0.3s ease;
+        position: relative;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .metric-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+        border-radius: 15px 15px 0 0;
+    }
+    
+    /* Color Classes */
+    .positive {
+        color: #00ff88;
+        font-weight: 600;
+        text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+    }
+    
+    .negative {
+        color: #ff6b6b;
+        font-weight: 600;
+        text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+    }
+    
+    /* Progress Bars */
+    .stProgress > div > div > div > div {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+    }
+    
+    /* Sidebar Styling */
+    .css-1d391kg {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(20px);
+        border-right: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        color: white;
+        border: none;
+        border-radius: 15px;
+        padding: 0.5rem 2rem;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        background: linear-gradient(45deg, #764ba2, #667eea);
+    }
+    
+    /* Text Input */
+    .stTextInput > div > div > input {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        color: white;
+        backdrop-filter: blur(10px);
+    }
+    
+    .stTextInput > div > div > input:focus {
+        border: 1px solid rgba(102, 126, 234, 0.8);
+        box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+    }
+    
+    /* Selectbox */
+    .stSelectbox > div > div {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        backdrop-filter: blur(10px);
+    }
+    
+    /* Slider */
+    .stSlider > div > div > div > div {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+    }
+    
+    /* Data Tables */
+    .stDataFrame {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 15px;
+        overflow: hidden;
+    }
+    
+    /* Success/Error Messages */
+    .stSuccess {
+        background: rgba(0, 255, 136, 0.1);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+        border-radius: 15px;
+        backdrop-filter: blur(10px);
+    }
+    
+    .stError {
+        background: rgba(255, 107, 107, 0.1);
+        border: 1px solid rgba(255, 107, 107, 0.3);
+        border-radius: 15px;
+        backdrop-filter: blur(10px);
+    }
+    
+    .stWarning {
+        background: rgba(255, 193, 7, 0.1);
+        border: 1px solid rgba(255, 193, 7, 0.3);
+        border-radius: 15px;
+        backdrop-filter: blur(10px);
+    }
+    
+    .stInfo {
+        background: rgba(52, 144, 220, 0.1);
+        border: 1px solid rgba(52, 144, 220, 0.3);
+        border-radius: 15px;
+        backdrop-filter: blur(10px);
+    }
+    
+    /* Floating Elements */
+    .floating {
+        animation: floating 3s ease-in-out infinite;
+    }
+    
+    @keyframes floating {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+    }
+    
+    /* Pulse Animation */
+    .pulse {
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+    }
+    
+    /* Neon Glow */
+    .neon-glow {
+        text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
+    }
+    
+    /* Loading Spinner */
+    .spinner {
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top: 4px solid #667eea;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 20px auto;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    /* Custom Sections */
+    .section-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.9);
+        text-align: center;
+        margin: 3rem 0 2rem 0;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        position: relative;
+    }
+    
+    .section-header::after {
+        content: '';
+        position: absolute;
+        bottom: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100px;
+        height: 3px;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 2px;
+    }
+    
+    /* Responsive Design */
+    @media (max-width: 768px) {
+        .main-header {
+            font-size: 2.5rem;
+        }
+        .sub-header {
+            font-size: 1.2rem;
+        }
+        .prediction-card {
+            padding: 1rem;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-header">SOLARIS</h1>', unsafe_allow_html=True)
-st.markdown('<h2 class="sub-header">A Machine Learning Based Hourly Stock Prediction Tool</h2>', unsafe_allow_html=True)
+# Hero Section with Floating Elements
+st.markdown("""
+<div class="floating">
+    <h1 class="main-header">🚀 SOLARIS</h1>
+</div>
+""", unsafe_allow_html=True)
 
-st.write("""
-This application combines Convolutional Neural Networks (CNN), Long Short-Term Memory (LSTM) networks, 
-and XGBoost with a Meta Learner Ensemble for short-term stock market predictions. 
-*Note: This is for educational and research purposes only - not financial advice.*
-""")
+st.markdown("""
+<div class="pulse">
+    <h2 class="sub-header">✨ Next-Gen AI Stock Prediction Engine ✨</h2>
+</div>
+""", unsafe_allow_html=True)
+
+# Enhanced Description Card
+st.markdown("""
+<div class="glass-card" style="text-align: center; margin-bottom: 2rem;">
+    <div style="font-size: 1.2rem; color: rgba(255, 255, 255, 0.9); line-height: 1.6;">
+        🧠 <strong>Advanced Ensemble Learning:</strong> CNN + LSTM + XGBoost + Meta Learner<br>
+        📊 <strong>Real-time Predictions:</strong> Hourly stock price forecasting<br>
+        🎯 <strong>High Accuracy:</strong> Multi-model consensus for reliable signals<br>
+        ⚡ <strong>Lightning Fast:</strong> Instant predictions powered by cutting-edge AI<br><br>
+        <em style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">
+            ⚠️ Educational & Research Tool • Not Financial Advice
+        </em>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 PREDICTION_HISTORY_CSV = "prediction_history.csv"
 show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
@@ -301,23 +649,53 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
     confidence = (max(up_count, down_count) / 3) * 100
     return predicted_price, pred_change_pct, votes, confidence
 
-st.sidebar.header("Configuration")
-selected_ticker = st.sidebar.text_input("Stock Ticker", "AAPL").upper()
-days_history = st.sidebar.slider("Days of History", min_value=30, max_value=729, value=90)
-run_prediction = st.sidebar.button("Run Prediction")
-evaluate_results = st.sidebar.button("Evaluate Predictions (fill actual prices in history CSV)")
-run_watchlist = st.sidebar.button("Run Watchlist Predictions (12 tickers)")
+# Enhanced Sidebar
+st.sidebar.markdown("""
+<div style="text-align: center; padding: 1rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.2); margin-bottom: 1rem;">
+    <h3 style="color: rgba(255, 255, 255, 0.9); margin: 0; font-weight: 600;">⚙️ Control Panel</h3>
+</div>
+""", unsafe_allow_html=True)
 
-# Indicator toggles
-st.sidebar.markdown("---")
-st.sidebar.subheader("Chart Indicators")
-overlay_options = st.sidebar.multiselect(
-    "Price Overlays",
-    ["SMA 5", "SMA 10", "SMA 20", "EMA 5", "EMA 10", "EMA 20"],
-    default=["SMA 20"]
+# Stock Selection with Enhanced Styling
+st.sidebar.markdown("### 📈 Stock Selection")
+selected_ticker = st.sidebar.text_input("Stock Ticker Symbol", "AAPL", help="Enter a valid stock ticker symbol (e.g., AAPL, MSFT, TSLA)").upper()
+
+# History Slider with Enhanced Styling
+st.sidebar.markdown("### 📊 Data Range")
+days_history = st.sidebar.slider(
+    "Historical Data Period", 
+    min_value=30, 
+    max_value=729, 
+    value=90,
+    help="Number of days of historical data to analyze"
 )
-show_rsi = st.sidebar.checkbox("Show RSI (14)", value=False)
-show_macd = st.sidebar.checkbox("Show MACD", value=False)
+
+# Action Buttons with Enhanced Styling
+st.sidebar.markdown("### 🚀 Actions")
+run_prediction = st.sidebar.button("🎯 Generate Prediction", help="Run AI prediction for selected stock")
+evaluate_results = st.sidebar.button("📋 Evaluate History", help="Fill in actual prices for previous predictions")
+run_watchlist = st.sidebar.button("📊 Watchlist Analysis", help="Run predictions for all watchlist stocks")
+
+# Chart Configuration
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+<div style="text-align: center; padding: 1rem 0;">
+    <h4 style="color: rgba(255, 255, 255, 0.9); margin: 0; font-weight: 600;">📈 Chart Configuration</h4>
+</div>
+""", unsafe_allow_html=True)
+
+# Enhanced Indicator Controls
+st.sidebar.markdown("#### Price Overlays")
+overlay_options = st.sidebar.multiselect(
+    "Select Moving Averages",
+    ["SMA 5", "SMA 10", "SMA 20", "EMA 5", "EMA 10", "EMA 20"],
+    default=["SMA 20"],
+    help="Choose which moving averages to display on the chart"
+)
+
+st.sidebar.markdown("#### Technical Indicators")
+show_rsi = st.sidebar.checkbox("📊 RSI (14)", value=False, help="Relative Strength Index")
+show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average Convergence Divergence")
 
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
@@ -327,16 +705,65 @@ else:
     latest_data = main_ticker_data.iloc[-1]
     current_price = latest_data['Close']
     current_time = latest_data.name
+    
+    # Enhanced Metrics Display
+    st.markdown('<h2 class="section-header">📊 Real-Time Market Data</h2>', unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns(3)
+    
     with col1:
-        st.metric("Current Price", f"${current_price:.2f}")
+        st.markdown("""
+        <div class="glass-card metric-card">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem;" class="neon-glow">
+                    ${current_price:.2f}
+                </div>
+                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
+                    💰 Current Price
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
     with col2:
         prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
         change = current_price - prev_close
         change_pct = (change / prev_close) * 100
-        st.metric("Change", f"{change:.2f}", f"{change_pct:.2f}%")
+        change_color = "#00ff88" if change >= 0 else "#ff6b6b"
+        change_icon = "📈" if change >= 0 else "📉"
+        
+        st.markdown(f"""
+        <div class="glass-card metric-card">
+            <div style="text-align: center;">
+                <div style="font-size: 2rem; font-weight: 900; color: {change_color}; margin-bottom: 0.5rem;" class="neon-glow">
+                    {change_icon} {change:.2f}
+                </div>
+                <div style="font-size: 1.3rem; color: {change_color}; font-weight: 700; margin-bottom: 0.5rem;">
+                    {change_pct:+.2f}%
+                </div>
+                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
+                    ⚡ Price Change
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
     with col3:
-        st.metric("Last Updated", current_time.strftime("%Y-%m-%d %H:%M"))
+        st.markdown(f"""
+        <div class="glass-card metric-card">
+            <div style="text-align: center;">
+                <div style="font-size: 1.8rem; font-weight: 900; color: #667eea; margin-bottom: 0.5rem;" class="neon-glow">
+                    🕐 {current_time.strftime("%H:%M")}
+                </div>
+                <div style="font-size: 1rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">
+                    {current_time.strftime("%Y-%m-%d")}
+                </div>
+                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
+                    📅 Last Updated
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     # Compute indicators for plotting
     close_series = main_ticker_data['Close']
     sma_5 = close_series.rolling(5).mean() if len(close_series) >= 5 else None
@@ -466,13 +893,45 @@ else:
                          name="Volume",
                          hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Vol: %{y:.0f}<extra>Volume</extra>"), row=vol_row, col=1)
     fig.add_vline(x=current_time, line_dash="dash", line_color="rgba(255,255,255,0.5)", row=price_row, col=1)
+    # Enhanced Chart Theme
     fig.update_layout(
         height=760 if extra_rows else 620,
         showlegend=True,
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0, groupclick='toggleitem'),
+        legend=dict(
+            orientation='h', 
+            yanchor='bottom', 
+            y=1.02, 
+            xanchor='left', 
+            x=0, 
+            groupclick='toggleitem',
+            bgcolor='rgba(255, 255, 255, 0.1)',
+            bordercolor='rgba(255, 255, 255, 0.2)',
+            borderwidth=1,
+            font=dict(color='rgba(255, 255, 255, 0.9)')
+        ),
         hovermode='x unified',
         xaxis_rangeslider_visible=False,
-        margin=dict(l=40, r=20, t=40, b=40)
+        margin=dict(l=40, r=20, t=40, b=40),
+        plot_bgcolor='rgba(255, 255, 255, 0.05)',
+        paper_bgcolor='rgba(255, 255, 255, 0.05)',
+        font=dict(color='rgba(255, 255, 255, 0.9)', family='Inter'),
+        title=dict(
+            text=f"{selected_ticker} Price Chart",
+            font=dict(size=24, color='rgba(255, 255, 255, 0.9)'),
+            x=0.5
+        )
+    )
+    
+    # Enhanced axis styling
+    fig.update_xaxes(
+        gridcolor='rgba(255, 255, 255, 0.1)',
+        color='rgba(255, 255, 255, 0.8)',
+        showgrid=True
+    )
+    fig.update_yaxes(
+        gridcolor='rgba(255, 255, 255, 0.1)',
+        color='rgba(255, 255, 255, 0.8)',
+        showgrid=True
     )
     # Fix RSI range for clarity
     if show_rsi and rsi_row is not None:
@@ -497,41 +956,119 @@ else:
                             "LSTM": "UP" if votes["LSTM"] == "UP" else "DOWN",
                             "XGBoost": "UP" if votes["XGBoost"] == "UP" else "DOWN"
                         }
-                        st.markdown("## Prediction Results")
+                        st.markdown('<h2 class="section-header">🎯 AI Prediction Results</h2>', unsafe_allow_html=True)
+                        
+                        # Prediction Cards with Enhanced Styling
                         pred_col1, pred_col2, pred_col3 = st.columns(3)
+                        
                         with pred_col1:
-                            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                            st.metric("Predicted Price (next hour)", f"${predicted_price:.2f}", 
-                                     f"{pred_change_pct:.2f}%")
-                            st.markdown('</div>', unsafe_allow_html=True)
+                            pred_color = "#00ff88" if pred_change_pct > 0 else "#ff6b6b"
+                            pred_icon = "🚀" if pred_change_pct > 1 else "📈" if pred_change_pct > 0 else "📉" if pred_change_pct < -1 else "📊"
+                            
+                            st.markdown(f"""
+                            <div class="glass-card prediction-card pulse">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 3rem; margin-bottom: 1rem;">{pred_icon}</div>
+                                    <div style="font-size: 2.5rem; font-weight: 900; color: {pred_color}; margin-bottom: 0.5rem;" class="neon-glow">
+                                        ${predicted_price:.2f}
+                                    </div>
+                                    <div style="font-size: 1.5rem; color: {pred_color}; font-weight: 700; margin-bottom: 1rem;">
+                                        {pred_change_pct:+.2f}%
+                                    </div>
+                                    <div style="font-size: 1.2rem; color: rgba(255, 255, 255, 0.9); font-weight: 600;">
+                                        🎯 Predicted Price (1 Hour)
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
                         with pred_col2:
-                            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
-                            st.write("**Model Votes**")
+                            # Model Consensus Card
+                            st.markdown("""
+                            <div class="glass-card prediction-card">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 2rem; margin-bottom: 1rem;">🧠</div>
+                                    <div style="font-size: 1.3rem; color: rgba(255, 255, 255, 0.9); font-weight: 600; margin-bottom: 1rem;">
+                                        AI Model Consensus
+                                    </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Model votes with enhanced styling
                             for model, vote in vote_display.items():
-                                color_class = "positive" if vote == "UP" else "negative"
-                                st.markdown(f"{model}: <span class='{color_class}'>{vote}</span>", unsafe_allow_html=True)
-                            st.write("**Confidence**")
-                            st.progress(confidence/100)
-                            st.write(f"{confidence:.1f}%")
-                            st.markdown('</div>', unsafe_allow_html=True)
+                                vote_color = "#00ff88" if vote == "UP" else "#ff6b6b"
+                                vote_icon = "🟢" if vote == "UP" else "🔴"
+                                st.markdown(f"""
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin: 0.5rem 0; padding: 0.5rem; background: rgba(255, 255, 255, 0.1); border-radius: 10px;">
+                                    <span style="color: rgba(255, 255, 255, 0.9); font-weight: 600;">{model}</span>
+                                    <span style="color: {vote_color}; font-weight: 700;">{vote_icon} {vote}</span>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Confidence with enhanced progress bar
+                            conf_color = "#00ff88" if confidence > 70 else "#ffa500" if confidence > 50 else "#ff6b6b"
+                            st.markdown(f"""
+                                <div style="margin-top: 1rem;">
+                                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.9); font-weight: 600; margin-bottom: 0.5rem;">
+                                        🎯 Confidence Level
+                                    </div>
+                                    <div style="background: rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 0.5rem; margin-bottom: 0.5rem;">
+                                        <div style="background: {conf_color}; height: 20px; border-radius: 10px; width: {confidence}%; transition: width 0.3s ease;"></div>
+                                    </div>
+                                    <div style="font-size: 1.5rem; color: {conf_color}; font-weight: 900; text-align: center;">
+                                        {confidence:.1f}%
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
                         with pred_col3:
-                            st.markdown('<div class="prediction-card">', unsafe_allow_html=True)
+                            # Trading Signal Card
                             if pred_change_pct > 1.0 and confidence > 70:
-                                st.success("**SIGNAL: STRONG BUY**")
-                                st.write(f"The model predicts a {pred_change_pct:.2f}% increase with high confidence.")
+                                signal_color = "#00ff88"
+                                signal_bg = "rgba(0, 255, 136, 0.2)"
+                                signal_icon = "🚀"
+                                signal_text = "STRONG BUY"
+                                signal_desc = f"High confidence prediction of {pred_change_pct:.2f}% increase"
                             elif pred_change_pct > 0.5:
-                                st.info("**SIGNAL: BUY**")
-                                st.write(f"The model predicts a {pred_change_pct:.2f}% increase.")
+                                signal_color = "#4CAF50"
+                                signal_bg = "rgba(76, 175, 80, 0.2)"
+                                signal_icon = "📈"
+                                signal_text = "BUY"
+                                signal_desc = f"Predicted {pred_change_pct:.2f}% increase"
                             elif pred_change_pct < -1.0 and confidence > 70:
-                                st.error("**SIGNAL: STRONG SELL**")
-                                st.write(f"The model predicts a {abs(pred_change_pct):.2f}% decrease with high confidence.")
+                                signal_color = "#ff6b6b"
+                                signal_bg = "rgba(255, 107, 107, 0.2)"
+                                signal_icon = "📉"
+                                signal_text = "STRONG SELL"
+                                signal_desc = f"High confidence prediction of {abs(pred_change_pct):.2f}% decrease"
                             elif pred_change_pct < -0.5:
-                                st.warning("**SIGNAL: SELL**")
-                                st.write(f"The model predicts a {abs(pred_change_pct):.2f}% decrease.")
+                                signal_color = "#ff9800"
+                                signal_bg = "rgba(255, 152, 0, 0.2)"
+                                signal_icon = "📊"
+                                signal_text = "SELL"
+                                signal_desc = f"Predicted {abs(pred_change_pct):.2f}% decrease"
                             else:
-                                st.info("**SIGNAL: HOLD**")
-                                st.write("No strong directional signal detected.")
-                            st.markdown('</div>', unsafe_allow_html=True)
+                                signal_color = "#667eea"
+                                signal_bg = "rgba(102, 126, 234, 0.2)"
+                                signal_icon = "⏸️"
+                                signal_text = "HOLD"
+                                signal_desc = "No strong directional signal detected"
+                            
+                            st.markdown(f"""
+                            <div class="glass-card prediction-card" style="border: 2px solid {signal_color}; background: {signal_bg};">
+                                <div style="text-align: center;">
+                                    <div style="font-size: 3rem; margin-bottom: 1rem;">{signal_icon}</div>
+                                    <div style="font-size: 1.8rem; color: {signal_color}; font-weight: 900; margin-bottom: 1rem;" class="neon-glow">
+                                        {signal_text}
+                                    </div>
+                                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.9); line-height: 1.4; margin-bottom: 1rem;">
+                                        {signal_desc}
+                                    </div>
+                                    <div style="font-size: 1rem; color: rgba(255, 255, 255, 0.7); font-weight: 600;">
+                                        🎯 Trading Signal
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
                         target_time = current_time + pd.Timedelta(hours=1)
                         ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
                         csv_row = {
@@ -629,7 +1166,7 @@ else:
             st.progress(min(1, max(0, 1-avg_pct_error/10)) if eval_count else 0)
 
 # --- HISTORY PREDICTION (SOLARIS) SECTION ---
-st.markdown("## History Prediction Summary")
+st.markdown('<h2 class="section-header">📋 Prediction History</h2>', unsafe_allow_html=True)
 solaris_csv_path = "solaris-data.csv"
 if os.path.exists(solaris_csv_path):
     hist_df = pd.read_csv(solaris_csv_path)
@@ -657,18 +1194,39 @@ else:
     st.warning("No solaris-data.csv file found for history prediction results.")
 
 st.markdown("---")
-st.markdown("## How SOLARIS Works")
+st.markdown('<h2 class="section-header">🔬 How SOLARIS Works</h2>', unsafe_allow_html=True)
 exp_col1, exp_col2 = st.columns(2)
 with exp_col1:
     st.markdown("""
-    ### Model Architecture
-    SOLARIS uses an ensemble of three different machine learning models:
-    1. **CNN (Convolutional Neural Network)**: Identifies patterns in price movements
-    2. **LSTM (Long Short-Term Memory)**: Captures sequential dependencies in time series data
-    3. **XGBoost**: Handles structured features and non-linear relationships
-    Predictions from these models are combined using a meta-learner for improved accuracy.
-    """)
-    st.markdown("### Top Predictive Features")
+    <div class="glass-card" style="margin-bottom: 2rem;">
+        <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem; text-align: center;">🧠 Model Architecture</h3>
+        <div style="color: rgba(255, 255, 255, 0.8); line-height: 1.6;">
+            SOLARIS uses an advanced ensemble of three cutting-edge machine learning models:<br><br>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>🔍 CNN (Convolutional Neural Network)</strong><br>
+                Identifies complex patterns in price movements and market trends
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>🔄 LSTM (Long Short-Term Memory)</strong><br>
+                Captures sequential dependencies and temporal patterns in time series data
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>⚡ XGBoost</strong><br>
+                Handles structured features and non-linear relationships with gradient boosting
+            </div>
+            <div style="text-align: center; margin-top: 1rem; padding: 1rem; background: linear-gradient(45deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2)); border-radius: 10px;">
+                <strong>🎯 Meta-Learner Ensemble</strong><br>
+                Combines all predictions for maximum accuracy and reliability
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class="glass-card">
+        <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem; text-align: center;">📊 Top Predictive Features</h3>
+        <div style="color: rgba(255, 255, 255, 0.8);">
+    """, unsafe_allow_html=True)
+    
     feature_importance = {
         "Previous Hour Return": 0.18,
         "RSI (14-period)": 0.15,
@@ -681,29 +1239,80 @@ with exp_col1:
         "Hour of Day": 0.05,
         "Day of Week": 0.04
     }
+    
     for feature, importance in feature_importance.items():
-        st.write(f"{feature}: {importance:.0%}")
-        st.progress(importance)
+        st.markdown(f"""
+        <div style="margin: 0.5rem 0; padding: 0.5rem; background: rgba(255, 255, 255, 0.1); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                <span style="color: rgba(255, 255, 255, 0.9); font-weight: 600;">{feature}</span>
+                <span style="color: #00ff88; font-weight: 700;">{importance:.0%}</span>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); border-radius: 10px; height: 8px;">
+                <div style="background: linear-gradient(90deg, #667eea, #764ba2); height: 8px; border-radius: 10px; width: {importance*100}%; transition: width 0.3s ease;"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("""
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 with exp_col2:
     st.markdown("""
-    ### Technical Details
-    - **Data Source**: Yahoo Finance API
-    - **Feature Engineering**: 34 technical indicators and cross-asset features
-    - **Sequence Length**: 128 hours (5+ days) of historical data
-    - **Training Period**: 2+ years of hourly data
-    - **Update Frequency**: Predictions are generated in real-time
-    """)
-    st.markdown("### Historical Backtest Performance")
+    <div class="glass-card" style="margin-bottom: 2rem;">
+        <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem; text-align: center;">⚙️ Technical Specifications</h3>
+        <div style="color: rgba(255, 255, 255, 0.8); line-height: 1.8;">
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>📡 Data Source:</strong> Yahoo Finance API
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>🔧 Feature Engineering:</strong> 34 technical indicators and cross-asset features
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>📏 Sequence Length:</strong> 128 hours (5+ days) of historical data
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>📚 Training Period:</strong> 2+ years of hourly data
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>⚡ Update Frequency:</strong> Real-time predictions
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("""
-    Based on extensive backtesting, the model has achieved:
-    - **Total Return**: 239.97%
-    - **Start Capital**: $10,000.00
-    - **Final Capital**: $33,997.15
-    - **Total Trades**: 8,944
-    - **Avg Hourly PnL**: $2.68 ± $91.17
-    """)
-    st.error("""
-    **Important Disclaimer**: 
-    This tool is for educational and research purposes only. 
-    Past performance is not indicative of future
-    """)
+    <div class="glass-card">
+        <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem; text-align: center;">📈 Backtest Performance</h3>
+        <div style="color: rgba(255, 255, 255, 0.8); line-height: 1.8;">
+            <div style="background: linear-gradient(45deg, rgba(0, 255, 136, 0.2), rgba(46, 204, 113, 0.2)); padding: 1rem; border-radius: 10px; margin: 0.5rem 0; border: 1px solid rgba(0, 255, 136, 0.3);">
+                <strong>💰 Total Return:</strong> <span style="color: #00ff88; font-weight: 900;">239.97%</span>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>🏦 Start Capital:</strong> $10,000.00
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>🎯 Final Capital:</strong> $33,997.15
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>📊 Total Trades:</strong> 8,944
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; margin: 0.5rem 0;">
+                <strong>⚡ Avg Hourly PnL:</strong> $2.68 ± $91.17
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div style="background: rgba(255, 107, 107, 0.1); border: 2px solid rgba(255, 107, 107, 0.3); border-radius: 15px; padding: 1.5rem; margin-top: 2rem; backdrop-filter: blur(10px);">
+        <div style="text-align: center;">
+            <div style="font-size: 2rem; margin-bottom: 1rem;">⚠️</div>
+            <h4 style="color: #ff6b6b; margin-bottom: 1rem;">Important Disclaimer</h4>
+            <p style="color: rgba(255, 255, 255, 0.9); line-height: 1.6; margin: 0;">
+                This tool is for <strong>educational and research purposes only</strong>.<br>
+                Past performance is <strong>not indicative of future results</strong>.<br>
+                Always consult with financial advisors before making investment decisions.
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
