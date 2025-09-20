@@ -91,13 +91,13 @@ st.markdown("""
         background-clip: text;
         text-align: center;
         margin-bottom: 0.5rem;
-        text-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
-        animation: glow 2s ease-in-out infinite alternate;
+        text-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        animation: subtle-glow 3s ease-in-out infinite alternate;
     }
     
-    @keyframes glow {
-        from { filter: drop-shadow(0 0 20px rgba(102, 126, 234, 0.5)); }
-        to { filter: drop-shadow(0 0 30px rgba(118, 75, 162, 0.8)); }
+    @keyframes subtle-glow {
+        from { filter: drop-shadow(0 0 5px rgba(102, 126, 234, 0.3)); }
+        to { filter: drop-shadow(0 0 15px rgba(118, 75, 162, 0.5)); }
     }
     
     .sub-header {
@@ -178,13 +178,13 @@ st.markdown("""
     .positive {
         color: #00ff88;
         font-weight: 600;
-        text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        text-shadow: 0 0 5px rgba(0, 255, 136, 0.3);
     }
     
     .negative {
         color: #ff6b6b;
         font-weight: 600;
-        text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+        text-shadow: 0 0 5px rgba(255, 107, 107, 0.3);
     }
     
     /* Progress Bars */
@@ -305,9 +305,9 @@ st.markdown("""
         100% { transform: scale(1); }
     }
     
-    /* Neon Glow */
+    /* Subtle Glow */
     .neon-glow {
-        text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
+        text-shadow: 0 0 3px currentColor, 0 0 6px currentColor;
     }
     
     /* Loading Spinner */
@@ -716,7 +716,7 @@ else:
         st.markdown(f"""
         <div class="glass-card metric-card">
             <div style="text-align: center;">
-                <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem;" class="neon-glow">
+                <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
                     {current_price_formatted}
                 </div>
                 <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
@@ -738,7 +738,7 @@ else:
         st.markdown(f"""
         <div class="glass-card metric-card">
             <div style="text-align: center;">
-                <div style="font-size: 2rem; font-weight: 900; color: {change_color}; margin-bottom: 0.5rem;" class="neon-glow">
+                <div style="font-size: 2rem; font-weight: 900; color: {change_color}; margin-bottom: 0.5rem; text-shadow: 0 0 3px {change_color}30;">
                     {change_icon} {change_formatted}
                 </div>
                 <div style="font-size: 1.3rem; color: {change_color}; font-weight: 700; margin-bottom: 0.5rem;">
@@ -755,7 +755,7 @@ else:
         st.markdown(f"""
         <div class="glass-card metric-card">
             <div style="text-align: center;">
-                <div style="font-size: 1.8rem; font-weight: 900; color: #667eea; margin-bottom: 0.5rem;" class="neon-glow">
+                <div style="font-size: 1.8rem; font-weight: 900; color: #667eea; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(102, 126, 234, 0.3);">
                     🕐 {current_time.strftime("%H:%M")}
                 </div>
                 <div style="font-size: 1rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">
@@ -974,7 +974,7 @@ else:
                             <div class="glass-card prediction-card pulse">
                                 <div style="text-align: center;">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">{pred_icon}</div>
-                                    <div style="font-size: 2.5rem; font-weight: 900; color: {pred_color}; margin-bottom: 0.5rem;" class="neon-glow">
+                                    <div style="font-size: 2.5rem; font-weight: 900; color: {pred_color}; margin-bottom: 0.5rem; text-shadow: 0 0 3px {pred_color}30;">
                                         {predicted_price_formatted}
                                     </div>
                                     <div style="font-size: 1.5rem; color: {pred_color}; font-weight: 700; margin-bottom: 1rem;">
@@ -1062,7 +1062,7 @@ else:
                             <div class="glass-card prediction-card" style="border: 2px solid {signal_color}; background: {signal_bg};">
                                 <div style="text-align: center;">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">{signal_icon}</div>
-                                    <div style="font-size: 1.8rem; color: {signal_color}; font-weight: 900; margin-bottom: 1rem;" class="neon-glow">
+                                    <div style="font-size: 1.8rem; color: {signal_color}; font-weight: 900; margin-bottom: 1rem; text-shadow: 0 0 3px {signal_color}30;">
                                         {signal_text}
                                     </div>
                                     <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.9); line-height: 1.4; margin-bottom: 1rem;">
