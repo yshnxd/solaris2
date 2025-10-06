@@ -1598,70 +1598,91 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
 
 # Theory Tab
 with tab6:
-    st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="section-header">📚 Theory: Methodology & Mathematical Details</h2>', unsafe_allow_html=True)
 
-    # --- Models Section ---
     st.markdown("""
     <div class="glass-card">
-        <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 1rem; text-align:center;">🧠 Models Used</h3>
-        <p style="color: rgba(255,255,255,0.85);">SOLARIS uses an ensemble of sequence models and tabular learners combined with a meta-learner. If you later switch models (e.g., ARIMA or Random Forest), this section remains a template you can adapt.</p>
+        <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 0.5rem;">🔬 Research Pipeline</h3>
+        <ol style="color: rgba(255,255,255,0.85); line-height: 1.7; margin: 0; padding-left: 1.2rem;">
+            <li>Collect hourly OHLCV for 12 equities via Yahoo Finance over ~2 years.</li>
+            <li>Align times across assets; forward-fill missing quotes.</li>
+            <li>Create features: returns, volatility, RSI/MACD, SMA/EMA, volume signals, calendar features, cross-asset returns.</li>
+            <li>Label: next-hour return \(r_{t+1} = (P_{t+1}-P_t)/P_t\).</li>
+            <li>Standardize features; build sequences of length 128 for sequence models.</li>
+            <li>Train base learners (CNN, LSTM, XGBoost) with MSE loss.</li>
+            <li>Train a meta-learner on base predictions plus summary statistics.</li>
+        </ol>
     </div>
     """, unsafe_allow_html=True)
+
+    # Data & labels
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem;">🧾 Data & Label</h4>
+        <p style="color: rgba(255,255,255,0.85);">Hourly price \(P_t\); label is next-hour return.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("**Label**")
+    st.latex(r"""
+    r_{t+1} = \frac{P_{t+1}-P_t}{P_t},\quad \hat{P}_{t+1} = P_t(1+\hat r_{t+1})
+    """)
+    st.markdown("**Features**")
+    st.latex(r"""
+    \begin{aligned}
+    &r_{t,\Delta} = \tfrac{P_t-P_{t-\Delta}}{P_{t-\Delta}};\; \sigma_{t,w} = \sqrt{\tfrac{1}{w-1}\sum_{i=0}^{w-1}(r_{t-i,1}-\bar r)^2}\\
+    &\text{RSI}=100-\tfrac{100}{1+RS},\; RS=\tfrac{\text{avg gain}_{14}}{\text{avg loss}_{14}};\; \text{MACD}=\text{EMA}_{12}-\text{EMA}_{26},\; \text{Signal}=\text{EMA}_9(\text{MACD})\\
+    &\text{SMA/EMA};\; \Delta V_t=\tfrac{V_t-V_{t-1}}{V_{t-1}},\; \text{VMA}_{24}=\tfrac{1}{24}\sum_{i=0}^{23}V_{t-i};\; \text{hour, dow};\; r^{(a)}_{t,1}
+    \end{aligned}
+    """)
 
     # LSTM
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4 style="margin-bottom:0.5rem;">🔄 LSTM (Long Short-Term Memory)</h4>
-        <p style="color: rgba(255,255,255,0.85);">Captures long-range temporal dependencies in price sequences.</p>
+        <p style="color: rgba(255,255,255,0.85);">Sequence model with memory cell \(c_t\) and hidden state \(h_t\) over L=128 steps.</p>
         <h5 style="margin-top:0.5rem;">How it works</h5>
-        <p style="color: rgba(255,255,255,0.8);">The cell keeps a running memory of recent patterns. Gates (forget, input, output) decide what to keep, add, or reveal, so the model can track momentum and regime shifts without forgetting too quickly.</p>
+        <p style="color: rgba(255,255,255,0.8);">Gates \(f_t,i_t,o_t\) control forgetting, writing, and exposure of memory.</p>
     </div>
     """, unsafe_allow_html=True)
     st.markdown("**Math**")
     st.latex(r"""
     \begin{aligned}
-    &\text{Input: } X = (x_{t-L+1},\dots,x_t) \\
-    &f_t = \sigma(W_f [h_{t-1}, x_t] + b_f),\quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i)\\
-    &\tilde{c}_t = \tanh(W_c [h_{t-1}, x_t] + b_c)\\
-    &c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t,\quad o_t = \sigma(W_o [h_{t-1}, x_t] + b_o) \\
-    &h_t = o_t \odot \tanh(c_t),\quad \hat{y}_{t+1} = W_y h_t + b_y
+    &f_t=\sigma(W_f[h_{t-1},x_t]+b_f),\; i_t=\sigma(W_i[h_{t-1},x_t]+b_i),\; o_t=\sigma(W_o[h_{t-1},x_t]+b_o)\\
+    &\tilde c_t=\tanh(W_c[h_{t-1},x_t]+b_c),\; c_t=f_t\odot c_{t-1}+i_t\odot\tilde c_t,\; h_t=o_t\odot\tanh(c_t),\; \hat r_{t+1}=W_y h_t+b_y
     \end{aligned}
     """)
-    st.markdown("**Learning**: Minimize MSE via BPTT with Adam.")
+    st.markdown("**Learning**: MSE via BPTT (Adam).")
     st.markdown("**Application (step-by-step)**")
     st.markdown("""
 ```text
-1) Take last 128 standardized feature vectors
-2) Pass through stacked LSTM → final hidden state h
-3) Dense layer maps h → predicted return
-4) Price forecast: P̂_{t+1} = P_t · (1 + predicted return)
+1) Take last 128 standardized vectors x_{t-127:t}
+2) LSTM → h_t → Dense → \hat r_{t+1}
+3) Price: \hat P_{t+1} = P_t (1+\hat r_{t+1})
 ```
 """)
-    st.markdown("**Pros**: Long-horizon memory, robust to regime shifts  \\ **Cons**: Slower training, risk of overfit without regularization")
+    st.markdown("**Pros**: Long memory  \\ **Cons**: Slower, regularization needed")
 
     # CNN
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4 style="margin-bottom:0.5rem;">🧩 CNN (Temporal Convolution)</h4>
-        <p style="color: rgba(255,255,255,0.85);">Learns local temporal patterns and motifs in rolling windows.</p>
-        <h5 style="margin-top:0.5rem;">How it works</h5>
-        <p style="color: rgba(255,255,255,0.8);">Sliding filters detect short-lived patterns (jumps, breakouts). Pooling summarizes strongest responses, making it fast and noise-tolerant.</p>
+        <p style="color: rgba(255,255,255,0.85);">Local temporal motif learner using Conv1D + pooling.</p>
     </div>
     """, unsafe_allow_html=True)
     st.markdown("**Math**")
     st.latex(r"""
-    \text{For kernel } k:\quad (X * k)_t = \sum_{\tau=0}^{K-1} k_{\tau}\, X_{t-\tau}
+    (X * k)_t = \sum_{\tau=0}^{K-1} k_{\tau}\, X_{t-\tau}
     """)
-    st.markdown("**Learning**: Minimize MSE with Adam.")
+    st.markdown("**Learning**: Minimize MSE (Adam).")
     st.markdown("**Application (step-by-step)**")
     st.markdown("""
 ```text
-1) Take last 128 vectors → Conv1D/ReLU/Pooling stacks
-2) Flatten → Dense → predicted return
-3) Price forecast: P̂_{t+1} = P_t · (1 + predicted return)
+1) 128-step window → Conv/BN/ReLU stacks
+2) GlobalAvgPool → Dense → \hat r_{t+1}
+3) Price: \hat P_{t+1} = P_t (1+\hat r_{t+1})
 ```
 """)
-    st.markdown("**Pros**: Fast, good at local patterns  \\ **Cons**: Limited long-range context unless dilated/deep")
+    st.markdown("**Pros**: Fast, robust to noise  \\ **Cons**: Limited long context unless deep/dilated")
 
     # XGBoost
     st.markdown("""
@@ -1698,9 +1719,9 @@ with tab6:
     """, unsafe_allow_html=True)
     st.markdown("**Math**")
     st.latex(r"""
-    \hat{r}_{meta} = g\Big([\hat{r}_{cnn},\,\hat{r}_{lstm},\,\hat{r}_{xgb},\, \mu,\, \sigma,\, \max,\, \min]\Big)
+    \hat{r}_{meta} = g\Big([\hat r_{cnn},\hat r_{lstm},\hat r_{xgb},\;\mu,\sigma,\max,\min]\Big)
     """)
-    st.markdown("**Learning**: Small linear/shallow model, trained to minimize MSE of final return.")
+    st.markdown("**Learning**: Shallow regressor (e.g., HistGBR) minimizing MSE on OOF predictions.")
     st.markdown("""
 **Application**: Final price \(\hat{P}_{t+1}=P_t (1+\hat{r}_{meta})\).<br/>
 **Pros**: Stable across regimes<br/>
