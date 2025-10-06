@@ -1629,86 +1629,97 @@ with tab6:
     <div class="glass-card" style="margin-top:1rem;">
         <h4 style="margin-bottom:0.5rem;">🔄 LSTM (Long Short-Term Memory)</h4>
         <p style="color: rgba(255,255,255,0.85);">Captures long-range temporal dependencies in price sequences.</p>
+        <h5 style="margin-top:0.5rem;">How it works</h5>
+        <p style="color: rgba(255,255,255,0.8);">The cell keeps a running memory of recent patterns. Gates (forget, input, output) decide what to keep, add, or reveal, so the model can track momentum and regime shifts without forgetting too quickly.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("**Mathematical Formulation**")
+    st.markdown("**Math**")
     st.latex(r"""
     \begin{aligned}
-    &\text{Input sequence: } X = (x_{t-L+1},\dots,x_t) \\
-    &\text{LSTM cell: } \\
-    &f_t = \sigma(W_f [h_{t-1}, x_t] + b_f),\quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i),\\
-    &\tilde{c}_t = \tanh(W_c [h_{t-1}, x_t] + b_c),\quad c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t,\\
-    &o_t = \sigma(W_o [h_{t-1}, x_t] + b_o),\quad h_t = o_t \odot \tanh(c_t) \\
-    &\text{Output: } \hat{y}_{t+1} = W_y h_t + b_y
+    &\text{Input: } X = (x_{t-L+1},\dots,x_t) \\
+    &f_t = \sigma(W_f [h_{t-1}, x_t] + b_f),\quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i)\\
+    &\tilde{c}_t = \tanh(W_c [h_{t-1}, x_t] + b_c)\\
+    &c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t,\quad o_t = \sigma(W_o [h_{t-1}, x_t] + b_o) \\
+    &h_t = o_t \odot \tanh(c_t),\quad \hat{y}_{t+1} = W_y h_t + b_y
     \end{aligned}
     """)
-    st.markdown("**Loss / Optimization**: Mean Squared Error (MSE), optimized via backpropagation through time (BPTT) and gradient descent (e.g., Adam).")
-    st.markdown("**Pros**: Good for sequential patterns, regime shifts; **Cons**: Slower to train, can overfit without regularization.")
-    st.markdown("**Why for stocks**: Captures momentum, mean-reversion, and intraday cycles across windows.")
-    st.markdown("**Pipeline (pseudo)**")
+    st.markdown("**Learning**: Minimize MSE via BPTT with Adam.")
+    st.markdown("**Application (step-by-step)**")
     st.markdown("""
 ```text
-window <- last 128 standardized feature vectors
-h <- LSTM(window)
-predicted_return <- dense(h)
-predicted_price <- current_price * (1 + predicted_return)
+1) Take last 128 standardized feature vectors
+2) Pass through stacked LSTM → final hidden state h
+3) Dense layer maps h → predicted return
+4) Price forecast: P̂_{t+1} = P_t · (1 + predicted return)
 ```
 """)
+    st.markdown("**Pros**: Long-horizon memory, robust to regime shifts  \\ **Cons**: Slower training, risk of overfit without regularization")
 
     # CNN
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4 style="margin-bottom:0.5rem;">🧩 CNN (Temporal Convolution)</h4>
         <p style="color: rgba(255,255,255,0.85);">Learns local temporal patterns and motifs in rolling windows.</p>
+        <h5 style="margin-top:0.5rem;">How it works</h5>
+        <p style="color: rgba(255,255,255,0.8);">Sliding filters detect short-lived patterns (jumps, breakouts). Pooling summarizes strongest responses, making it fast and noise-tolerant.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("**Mathematical Formulation**")
-    st.latex(r"\text{For kernel } k: \quad (X * k)_t = \sum_{\tau=0}^{K-1} k_{\tau} \cdot X_{t-\tau}")
-    st.markdown("**Loss / Optimization**: MSE minimized via stochastic gradient descent (Adam).")
-    st.markdown("**Pros**: Fast inference; local feature extraction (spikes, breakouts). **Cons**: Limited long-horizon context without dilation or stacking.")
-    st.markdown("**Why for stocks**: Detects short-term impulses, microstructure patterns.")
-    st.markdown("**Pipeline (pseudo)**")
+    st.markdown("**Math**")
+    st.latex(r"""
+    \text{For kernel } k:\quad (X * k)_t = \sum_{\tau=0}^{K-1} k_{\tau}\, X_{t-\tau}
+    """)
+    st.markdown("**Learning**: Minimize MSE with Adam.")
+    st.markdown("**Application (step-by-step)**")
     st.markdown("""
 ```text
-window <- last 128 standardized feature vectors
-features <- Conv1D/ReLU/Pooling stacks
-predicted_return <- dense(features)
-predicted_price <- current_price * (1 + predicted_return)
+1) Take last 128 vectors → Conv1D/ReLU/Pooling stacks
+2) Flatten → Dense → predicted return
+3) Price forecast: P̂_{t+1} = P_t · (1 + predicted return)
 ```
 """)
+    st.markdown("**Pros**: Fast, good at local patterns  \\ **Cons**: Limited long-range context unless dilated/deep")
 
     # XGBoost
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4 style="margin-bottom:0.5rem;">🌳 XGBoost (Gradient-Boosted Trees)</h4>
         <p style="color: rgba(255,255,255,0.85);">Learns tabular, non-linear interactions from the most recent feature vector.</p>
+        <h5 style="margin-top:0.5rem;">How it works</h5>
+        <p style="color: rgba(255,255,255,0.8);">Adds shallow trees one-by-one to correct residual errors, with regularization and shrinkage to avoid overfitting.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("**Mathematical Formulation**")
-    st.latex(r"\hat{y}(x) = \sum_{m=1}^{M} \gamma_m T_m(x), \quad \text{with } \gamma_m \text{ fit by gradient boosting}")
-    st.markdown("**Loss / Optimization**: Regularized objective with shrinkage; stage-wise additive modeling minimizing gradient of loss.")
-    st.markdown("**Pros**: Handles heterogeneous features, robustness; **Cons**: Less effective for raw sequences.")
-    st.markdown("**Why for stocks**: Strong on engineered indicators, cross-asset features, calendar effects.")
-    st.markdown("**Pipeline (pseudo)**")
+    st.markdown("**Math**")
+    st.latex(r"""
+    \hat{y}(x) = \sum_{m=1}^{M} \gamma_m\, T_m(x)
+    """)
+    st.markdown("**Learning**: Regularized gradient boosting with shrinkage and column subsampling.")
+    st.markdown("**Application (step-by-step)**")
     st.markdown("""
 ```text
-x_tab <- last standardized feature vector
-predicted_return <- XGBoost(x_tab)
-predicted_price <- current_price * (1 + predicted_return)
+1) Build last feature vector (indicators, calendar, cross-asset)
+2) Apply boosted trees → predicted return
+3) Price forecast: P̂_{t+1} = P_t · (1 + predicted return)
 ```
 """)
+    st.markdown("**Pros**: Strong on tabular signals, robust  \\ **Cons**: Weak on raw sequence structure")
 
     # Meta-learner
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4 style="margin-bottom:0.5rem;">🤝 Meta-Learner (Ensemble)</h4>
-        <p style="color: rgba(255,255,255,0.85);">Combines CNN/LSTM/XGBoost predictions and simple summary stats.</p>
+        <p style="color: rgba(255,255,255,0.85);">Combines CNN/LSTM/XGBoost predictions and summary stats for stability.</p>
+        <h5 style="margin-top:0.5rem;">How it works</h5>
+        <p style="color: rgba(255,255,255,0.8);">Learns weights to trust each model under different regimes (trendy vs. choppy), plus simple statistics.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("**Formulation**")
-    st.latex(r"\hat{r}_{meta} = g\big([\hat{r}_{cnn}, \hat{r}_{lstm}, \hat{r}_{xgb}, \mu, \sigma, \max, \min]\big)")
-    st.markdown("Where g is a small model (e.g., linear or shallow net). Final price is \(\hat{P}_{t+1}=P_t (1+\hat{r}_{meta})\).")
-    st.markdown("**Why**: Blends diverse biases/variances → improved stability.")
+    st.markdown("**Math**")
+    st.latex(r"""
+    \hat{r}_{meta} = g\Big([\hat{r}_{cnn},\,\hat{r}_{lstm},\,\hat{r}_{xgb},\, \mu,\, \sigma,\, \max,\, \min]\Big)
+    """)
+    st.markdown("**Learning**: Small linear/shallow model, trained to minimize MSE of final return.")
+    st.markdown("**Application**: Final price \(\hat{P}_{t+1}=P_t (1+\hat{r}_{meta})\).  \\
+**Pros**: Stable across regimes  \\
+**Cons**: Can dilute strong model when signals are very clean")
 
     # --- Indicators Section ---
     st.markdown("""
@@ -1722,75 +1733,115 @@ predicted_price <- current_price * (1 + predicted_return)
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4>📈 Trend</h4>
-        <ul>
-            <li><strong>SMA(w)</strong>: \(\text{SMA}_t = \frac{1}{w} \sum_{i=0}^{w-1} P_{t-i}\) — smooths noise, highlights direction.</li>
-            <li><strong>EMA(w)</strong>: \(\text{EMA}_t = \alpha P_t + (1-\alpha)\,\text{EMA}_{t-1}\), \(\alpha=\frac{2}{w+1}\).</li>
-            <li><strong>MACD</strong>: \(\text{MACD}_t = \text{EMA}_{12}(P)_t - \text{EMA}_{26}(P)_t\).</li>
-            <li><strong>Signal</strong>: \(\text{Signal}_t = \text{EMA}_{9}(\text{MACD})_t\).</li>
-        </ul>
+        <h5>Math</h5>
     </div>
     """, unsafe_allow_html=True)
+    st.latex(r"""
+    \text{SMA}_t = \frac{1}{w} \sum_{i=0}^{w-1} P_{t-i}\quad\quad
+    \text{EMA}_t = \alpha P_t + (1-\alpha)\,\text{EMA}_{t-1},\; \alpha=\tfrac{2}{w+1}
+    """)
+    st.latex(r"""
+    \text{MACD}_t = \text{EMA}_{12}(P)_t - \text{EMA}_{26}(P)_t,\quad
+    \text{Signal}_t = \text{EMA}_{9}(\text{MACD})_t
+    """)
+    st.markdown("**How it works**: Averages smooth noise so direction is clearer; MACD subtracts slow from fast average to reveal turning points.")
+    st.markdown("**Application (step-by-step)**")
+    st.markdown("""
+```text
+1) Compute SMA/EMA over window(s)
+2) Compute MACD = EMA_fast − EMA_slow; Signal = EMA(MACD)
+3) Use trend slope/crossovers as model inputs
+```
+""")
+    st.markdown("**Pros**: Simple, robust to noise  \\ **Cons**: Lagging vs. price reversals")
 
     # Momentum
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4>🏃 Momentum</h4>
-        <ul>
-            <li><strong>Returns</strong>: \(r_{t,\Delta} = \frac{P_t - P_{t-\Delta}}{P_{t-\Delta}}\) for \(\Delta\in\{1,3,6,12,24\}\,\text{hours}\).</li>
-            <li><strong>RSI(14)</strong>: \(\text{RSI} = 100 - \frac{100}{1 + RS}\), \(RS=\frac{\text{avg gain}_{14}}{\text{avg loss}_{14}}\).</li>
-            <li><strong>Cross-asset 1h returns</strong>: same return formula using peer tickers (AAPL, MSFT, ...).</li>
-        </ul>
-        <p style="color: rgba(255,255,255,0.8);">Momentum captures trend persistence; RSI flags overbought/oversold states.</p>
+        <h5>Math</h5>
     </div>
     """, unsafe_allow_html=True)
+    st.latex(r"""
+    r_{t,\Delta} = \frac{P_t - P_{t-\Delta}}{P_{t-\Delta}}\quad\text{(various }\Delta)\qquad
+    \text{RSI} = 100 - \frac{100}{1 + RS},\; RS=\frac{\text{avg gain}_{14}}{\text{avg loss}_{14}}
+    """)
+    st.markdown("**How it works**: Returns measure persistence in direction; RSI normalizes recent gains vs. losses to flag stretched moves.")
+    st.markdown("**Application (step-by-step)**")
+    st.markdown("""
+```text
+1) Compute multi-horizon returns (e.g., 1h, 6h, 24h)
+2) Compute RSI(14) from smoothed gains/losses
+3) Include cross-asset returns from peers
+```
+""")
+    st.markdown("**Pros**: Catches persistence/mean-reversion  \\ **Cons**: Whipsaws in choppy markets")
 
     # Volatility
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4>🌪️ Volatility</h4>
-        <ul>
-            <li><strong>Rolling Std</strong>: \(\sigma_{t,w} = \sqrt{\frac{1}{w-1} \sum_{i=0}^{w-1} (r_{t-i,1}-\bar{r})^2}\) for windows 6h, 12h, 24h.</li>
-        </ul>
-        <p style="color: rgba(255,255,255,0.8);">Higher volatility widens expected price distribution; important for risk-adjusted signals.</p>
+        <h5>Math</h5>
     </div>
     """, unsafe_allow_html=True)
+    st.latex(r"""
+    \sigma_{t,w} = \sqrt{\frac{1}{w-1} \sum_{i=0}^{w-1} (r_{t-i,1}-\bar{r})^2}
+    """)
+    st.markdown("**How it works**: Measures dispersion of recent returns; higher \(\sigma\) implies wider outcome range and lower confidence.")
+    st.markdown("**Application (step-by-step)**")
+    st.markdown("""
+```text
+1) Compute 1h returns
+2) Compute rolling mean and std over 6h/12h/24h
+3) Use std to scale model confidence and position sizing features
+```
+""")
+    st.markdown("**Pros**: Encodes risk/regime  \\ **Cons**: Can lag; sensitive to outliers")
 
     # Volume
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4>📦 Volume</h4>
-        <ul>
-            <li><strong>Volume change (1h)</strong>: \(\Delta V_t = \frac{V_t - V_{t-1}}{V_{t-1}}\).</li>
-            <li><strong>Volume MA(24h)</strong>: \(\text{VMA}_{24} = \frac{1}{24} \sum_{i=0}^{23} V_{t-i}\).</li>
-        </ul>
-        <p style="color: rgba(255,255,255,0.8);">Volume confirms moves; surges can precede breakouts or exhaustion.</p>
+        <h5>Math</h5>
     </div>
     """, unsafe_allow_html=True)
+    st.latex(r"""
+    \Delta V_t = \frac{V_t - V_{t-1}}{V_{t-1}}\quad\quad
+    \text{VMA}_{24} = \frac{1}{24} \sum_{i=0}^{23} V_{t-i}
+    """)
+    st.markdown("**How it works**: Rising volume confirms participation; extreme surges can signal breakouts or exhaustion.")
+    st.markdown("**Application (step-by-step)**")
+    st.markdown("""
+```text
+1) Compute 1h volume change and 24h volume MA
+2) Combine with price moves to confirm/discount signals
+```
+""")
+    st.markdown("**Pros**: Confirms moves  \\ **Cons**: Noisy during illiquid periods")
 
     # Calendar and Price
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4>🗓️ Calendar & Price</h4>
-        <ul>
-            <li><strong>Hour of day</strong>: captures intraday seasonality (open/close effects).</li>
-            <li><strong>Day of week</strong>: weekday effects (e.g., Monday momentum).</li>
-            <li><strong>Price</strong>: level feature that interacts with indicators (e.g., distance from averages).</li>
-        </ul>
+        <p style="color: rgba(255,255,255,0.8);">Encodes intraday/weekly seasonality and price-level context.</p>
     </div>
     """, unsafe_allow_html=True)
+    st.markdown("**Application (step-by-step)**")
+    st.markdown("""
+```text
+1) Extract hour-of-day and day-of-week
+2) Include raw price and distances to averages (e.g., P − SMA)
+3) Feed as auxiliary features to models
+```
+""")
+    st.markdown("**Pros**: Adds systematic timing/context  \\ **Cons**: Patterns drift across assets/periods")
 
     # Why helpful
     st.markdown("""
     <div class="glass-card" style="margin-top:1rem;">
         <h4>💡 Why these help forecasting</h4>
-        <ul>
-            <li><strong>MAs</strong> smooth noise and reveal underlying direction.</li>
-            <li><strong>RSI</strong> highlights stretched conditions that often mean-revert.</li>
-            <li><strong>MACD</strong> detects trend changes via moving-average crossovers.</li>
-            <li><strong>Volatility</strong> modulates confidence and expected move size.</li>
-            <li><strong>Volume</strong> validates price moves; abnormal activity can signal regime shifts.</li>
-            <li><strong>Cross-asset returns</strong> exploit correlation and leadership effects across related stocks.</li>
-            <li><strong>Calendar</strong> encodes systematic intraday/weekly patterns.</li>
-        </ul>
+        <p style="color: rgba(255,255,255,0.85);">
+        Trend captures direction; Momentum/RSI capture persistence and reversion; Volatility scales confidence; Volume confirms participation; Cross-asset returns leverage correlations; Calendar adds systematic timing; Price level contextualizes distances from anchors.
+        </p>
     </div>
     """, unsafe_allow_html=True)
