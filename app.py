@@ -1717,9 +1717,11 @@ with tab6:
     \hat{r}_{meta} = g\Big([\hat{r}_{cnn},\,\hat{r}_{lstm},\,\hat{r}_{xgb},\, \mu,\, \sigma,\, \max,\, \min]\Big)
     """)
     st.markdown("**Learning**: Small linear/shallow model, trained to minimize MSE of final return.")
-    st.markdown("**Application**: Final price \(\hat{P}_{t+1}=P_t (1+\hat{r}_{meta})\).  \\
-**Pros**: Stable across regimes  \\
-**Cons**: Can dilute strong model when signals are very clean")
+    st.markdown("""
+**Application**: Final price \(\hat{P}_{t+1}=P_t (1+\hat{r}_{meta})\).<br/>
+**Pros**: Stable across regimes<br/>
+**Cons**: Can dilute strong model when signals are very clean
+""")
 
     # --- Indicators Section ---
     st.markdown("""
