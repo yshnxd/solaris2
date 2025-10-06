@@ -684,16 +684,7 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    with col4:
-        st.markdown("""
-        <div class="glass-card metric-card">
-            <div style="text-align: center;">
-                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎯</div>
-                <div style="font-size: 1.5rem; color: #ff6b6b; font-weight: 900;">239%</div>
-                <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Backtest ROI</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Removed Backtest ROI card per request
     
     # Quick Actions
     st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">🚀 Quick Actions</h3>', unsafe_allow_html=True)
@@ -702,11 +693,13 @@ with tab1:
     
     with action_col1:
         if st.button("🎯 Generate Prediction", key="dashboard_pred", help="Run AI prediction"):
+            st.session_state.trigger_prediction = True
             st.session_state.active_tab = "Predictions"
             st.rerun()
     
     with action_col2:
         if st.button("📊 View Analytics", key="dashboard_analytics", help="Check prediction history"):
+            st.session_state.trigger_evaluate = True
             st.session_state.active_tab = "Analytics"
             st.rerun()
     
@@ -781,7 +774,20 @@ with tab1:
     else:
         st.info("Not enough data to show real-time metrics yet.")
 
-    # Recent Activity
+    # Current Stock Graph right after Real-Time Market Data
+    if main_ticker_data is not None and not main_ticker_data.empty and len(main_ticker_data) >= 128:
+        close_series = main_ticker_data['Close']
+        sma_20 = close_series.rolling(20).mean() if len(close_series) >= 20 else None
+        fig_dash = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=(f"{selected_ticker} Price", 'Volume'))
+        fig_dash.add_trace(go.Candlestick(x=main_ticker_data.index, open=main_ticker_data['Open'], high=main_ticker_data['High'], low=main_ticker_data['Low'], close=main_ticker_data['Close'], name="Price"), row=1, col=1)
+        if sma_20 is not None:
+            fig_dash.add_trace(go.Scatter(x=sma_20.index, y=sma_20, name='SMA 20', mode='lines', line=dict(color='#c7c7c7', width=1.2, dash='dash')), row=1, col=1)
+        colors_dash = ['rgba(231,76,60,0.45)' if row['Open'] > row['Close'] else 'rgba(46,204,113,0.45)' for _, row in main_ticker_data.iterrows()]
+        fig_dash.add_trace(go.Bar(x=main_ticker_data.index, y=main_ticker_data['Volume'], marker_color=colors_dash, name="Volume"), row=2, col=1)
+        fig_dash.update_layout(height=520, showlegend=True, plot_bgcolor='rgba(255, 255, 255, 0.05)', paper_bgcolor='rgba(255, 255, 255, 0.05)', font=dict(color='rgba(255, 255, 255, 0.9)', family='Inter'))
+        st.plotly_chart(fig_dash, use_container_width=True)
+
+    # Recent Activity (move to end of Dashboard)
     st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📋 Recent Activity</h3>', unsafe_allow_html=True)
     
     # Load recent predictions if available
@@ -799,10 +805,10 @@ with tab1:
                 for _, row in recent_df.iterrows():
                     signal_color = "#00ff88" if row.get('signal') == "BUY" else "#ff6b6b" if row.get('signal') == "SELL" else "#667eea"
                     st.markdown(f"""
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: rgba(255, 255, 255, 0.1); border-radius: 8px; margin: 0.5rem 0;">
-                        <span style="color: rgba(255, 255, 255, 0.9); font-weight: 600;">{row.get('ticker', 'N/A')}</span>
-                        <span style="color: {signal_color}; font-weight: 700;">{row.get('signal', 'N/A')}</span>
-                        <span style="color: rgba(255, 255, 255, 0.7);">${row.get('predicted_price', 0):.2f}</span>
+                    <div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0.6rem; background: rgba(255, 255, 255, 0.1); border-radius: 10px; margin: 0.5rem 0;">
+                        <div style="text-align: left; color: rgba(255, 255, 255, 0.9); font-weight: 600;">{row.get('ticker', 'N/A')}</div>
+                        <div style="text-align: center; color: #00ff88; font-weight: 800; font-size: 1.1rem; text-shadow: 0 0 6px rgba(0,255,136,0.25);">${row.get('predicted_price', 0):.2f}</div>
+                        <div style="text-align: right; color: {signal_color}; font-weight: 700;">{row.get('signal', 'N/A')}</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -884,6 +890,10 @@ overlay_options = st.sidebar.multiselect(
 st.sidebar.markdown("#### Technical Indicators")
 show_rsi = st.sidebar.checkbox("📊 RSI (14)", value=False, help="Relative Strength Index")
 show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average Convergence Divergence")
+
+# Bridge quick-action triggers to existing logic
+trigger_prediction = st.session_state.pop('trigger_prediction', False) if 'trigger_prediction' in st.session_state else False
+trigger_evaluate = st.session_state.pop('trigger_evaluate', False) if 'trigger_evaluate' in st.session_state else False
 
 # Predictions Tab
 with tab2:
@@ -1398,8 +1408,8 @@ with tab5:
 if cnn_model and lstm_model and xgb_model and meta_model and scaler:
     if main_ticker_data is not None and not main_ticker_data.empty and len(main_ticker_data) >= 128:
         cross_data = fetch_cross_assets(main_ticker_data.index, days_history, selected_ticker)
-        run_watchlist_triggered = run_watchlist
-        if run_prediction:
+        run_watchlist_triggered = run_watchlist or trigger_prediction and False  # no watchlist on quick pred
+        if run_prediction or trigger_prediction:
             with st.spinner('Generating prediction...'):
                 features = create_features_for_app(selected_ticker, main_ticker_data, cross_data)
                 if len(features) < 128:
@@ -1596,7 +1606,7 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
                     st.warning("No watchlist predictions could be generated (insufficient data).")
                 else:
                     st.success(f"Appended {appended} watchlist predictions to {PREDICTION_HISTORY_CSV}. See the History Prediction table below.")
-        if evaluate_results:
+        if evaluate_results or trigger_evaluate:
             with st.spinner("Evaluating prediction history and filling actuals..."):
                 updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
                 if updated_df is not None:
