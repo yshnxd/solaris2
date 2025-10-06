@@ -378,7 +378,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main Navigation Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📊 Analytics", "📈 Charts", "⚙️ Settings"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📊 Analytics", "📈 Charts", "⚙️ Settings", "📚 Theory"])
 
 PREDICTION_HISTORY_CSV = "prediction_history.csv"
 show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
@@ -1610,3 +1610,185 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
             st.metric("Average % Error", f"{avg_pct_error:.2f}%" if eval_count else "N/A")
             st.progress(min(1, max(0, 1-avg_pct_error/10)) if eval_count else 0)
 
+
+
+# Theory Tab
+with tab6:
+    st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
+
+    # --- Models Section ---
+    st.markdown("""
+    <div class="glass-card">
+        <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 1rem; text-align:center;">🧠 Models Used</h3>
+        <p style="color: rgba(255,255,255,0.85);">SOLARIS uses an ensemble of sequence models and tabular learners combined with a meta-learner. If you later switch models (e.g., ARIMA or Random Forest), this section remains a template you can adapt.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # LSTM
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem;">🔄 LSTM (Long Short-Term Memory)</h4>
+        <p style="color: rgba(255,255,255,0.85);">Captures long-range temporal dependencies in price sequences.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("**Mathematical Formulation**")
+    st.latex(r"\begin{aligned}
+    &\text{Input sequence: } X = (x_{t-L+1},\dots,x_t) \\
+    &\text{LSTM cell: } \\
+    &f_t = \sigma(W_f [h_{t-1}, x_t] + b_f),\quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i),\\
+    &\tilde{c}_t = \tanh(W_c [h_{t-1}, x_t] + b_c),\quad c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t,\\
+    &o_t = \sigma(W_o [h_{t-1}, x_t] + b_o),\quad h_t = o_t \odot \tanh(c_t) \\
+    &\text{Output: } \hat{y}_{t+1} = W_y h_t + b_y
+    \end{aligned}")
+    st.markdown("**Loss / Optimization**: Mean Squared Error (MSE), optimized via backpropagation through time (BPTT) and gradient descent (e.g., Adam).")
+    st.markdown("**Pros**: Good for sequential patterns, regime shifts; **Cons**: Slower to train, can overfit without regularization.")
+    st.markdown("**Why for stocks**: Captures momentum, mean-reversion, and intraday cycles across windows.")
+    st.markdown("**Pipeline (pseudo)**")
+    st.markdown("""
+```text
+window <- last 128 standardized feature vectors
+h <- LSTM(window)
+predicted_return <- dense(h)
+predicted_price <- current_price * (1 + predicted_return)
+```
+""")
+
+    # CNN
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem;">🧩 CNN (Temporal Convolution)</h4>
+        <p style="color: rgba(255,255,255,0.85);">Learns local temporal patterns and motifs in rolling windows.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("**Mathematical Formulation**")
+    st.latex(r"\text{For kernel } k: \quad (X * k)_t = \sum_{\tau=0}^{K-1} k_{\tau} \cdot X_{t-\tau}")
+    st.markdown("**Loss / Optimization**: MSE minimized via stochastic gradient descent (Adam).")
+    st.markdown("**Pros**: Fast inference; local feature extraction (spikes, breakouts). **Cons**: Limited long-horizon context without dilation or stacking.")
+    st.markdown("**Why for stocks**: Detects short-term impulses, microstructure patterns.")
+    st.markdown("**Pipeline (pseudo)**")
+    st.markdown("""
+```text
+window <- last 128 standardized feature vectors
+features <- Conv1D/ReLU/Pooling stacks
+predicted_return <- dense(features)
+predicted_price <- current_price * (1 + predicted_return)
+```
+""")
+
+    # XGBoost
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem;">🌳 XGBoost (Gradient-Boosted Trees)</h4>
+        <p style="color: rgba(255,255,255,0.85);">Learns tabular, non-linear interactions from the most recent feature vector.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("**Mathematical Formulation**")
+    st.latex(r"\hat{y}(x) = \sum_{m=1}^{M} \gamma_m T_m(x), \quad \text{with } \gamma_m \text{ fit by gradient boosting}")
+    st.markdown("**Loss / Optimization**: Regularized objective with shrinkage; stage-wise additive modeling minimizing gradient of loss.")
+    st.markdown("**Pros**: Handles heterogeneous features, robustness; **Cons**: Less effective for raw sequences.")
+    st.markdown("**Why for stocks**: Strong on engineered indicators, cross-asset features, calendar effects.")
+    st.markdown("**Pipeline (pseudo)**")
+    st.markdown("""
+```text
+x_tab <- last standardized feature vector
+predicted_return <- XGBoost(x_tab)
+predicted_price <- current_price * (1 + predicted_return)
+```
+""")
+
+    # Meta-learner
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem;">🤝 Meta-Learner (Ensemble)</h4>
+        <p style="color: rgba(255,255,255,0.85);">Combines CNN/LSTM/XGBoost predictions and simple summary stats.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("**Formulation**")
+    st.latex(r"\hat{r}_{meta} = g\big([\hat{r}_{cnn}, \hat{r}_{lstm}, \hat{r}_{xgb}, \mu, \sigma, \max, \min]\big)")
+    st.markdown("Where g is a small model (e.g., linear or shallow net). Final price is \(\hat{P}_{t+1}=P_t (1+\hat{r}_{meta})\).")
+    st.markdown("**Why**: Blends diverse biases/variances → improved stability.")
+
+    # --- Indicators Section ---
+    st.markdown("""
+    <div class="glass-card" style="margin-top:2rem;">
+        <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 1rem; text-align:center;">📐 Technical Indicators (34)</h3>
+        <p style="color: rgba(255,255,255,0.85);">Grouped into Trend, Momentum, Volatility, and Volume, plus Calendar/Price features. Below are formulas and intuition.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Trend
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>📈 Trend</h4>
+        <ul>
+            <li><strong>SMA(w)</strong>: \(\text{SMA}_t = \frac{1}{w} \sum_{i=0}^{w-1} P_{t-i}\) — smooths noise, highlights direction.</li>
+            <li><strong>EMA(w)</strong>: \(\text{EMA}_t = \alpha P_t + (1-\alpha)\,\text{EMA}_{t-1}\), \(\alpha=\frac{2}{w+1}\).</li>
+            <li><strong>MACD</strong>: \(\text{MACD}_t = \text{EMA}_{12}(P)_t - \text{EMA}_{26}(P)_t\).</li>
+            <li><strong>Signal</strong>: \(\text{Signal}_t = \text{EMA}_{9}(\text{MACD})_t\).</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Momentum
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>🏃 Momentum</h4>
+        <ul>
+            <li><strong>Returns</strong>: \(r_{t,\Delta} = \frac{P_t - P_{t-\Delta}}{P_{t-\Delta}}\) for \(\Delta\in\{1,3,6,12,24\}\,\text{hours}\).</li>
+            <li><strong>RSI(14)</strong>: \(\text{RSI} = 100 - \frac{100}{1 + RS}\), \(RS=\frac{\text{avg gain}_{14}}{\text{avg loss}_{14}}\).</li>
+            <li><strong>Cross-asset 1h returns</strong>: same return formula using peer tickers (AAPL, MSFT, ...).</li>
+        </ul>
+        <p style="color: rgba(255,255,255,0.8);">Momentum captures trend persistence; RSI flags overbought/oversold states.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Volatility
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>🌪️ Volatility</h4>
+        <ul>
+            <li><strong>Rolling Std</strong>: \(\sigma_{t,w} = \sqrt{\frac{1}{w-1} \sum_{i=0}^{w-1} (r_{t-i,1}-\bar{r})^2}\) for windows 6h, 12h, 24h.</li>
+        </ul>
+        <p style="color: rgba(255,255,255,0.8);">Higher volatility widens expected price distribution; important for risk-adjusted signals.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Volume
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>📦 Volume</h4>
+        <ul>
+            <li><strong>Volume change (1h)</strong>: \(\Delta V_t = \frac{V_t - V_{t-1}}{V_{t-1}}\).</li>
+            <li><strong>Volume MA(24h)</strong>: \(\text{VMA}_{24} = \frac{1}{24} \sum_{i=0}^{23} V_{t-i}\).</li>
+        </ul>
+        <p style="color: rgba(255,255,255,0.8);">Volume confirms moves; surges can precede breakouts or exhaustion.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Calendar and Price
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>🗓️ Calendar & Price</h4>
+        <ul>
+            <li><strong>Hour of day</strong>: captures intraday seasonality (open/close effects).</li>
+            <li><strong>Day of week</strong>: weekday effects (e.g., Monday momentum).</li>
+            <li><strong>Price</strong>: level feature that interacts with indicators (e.g., distance from averages).</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Why helpful
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>💡 Why these help forecasting</h4>
+        <ul>
+            <li><strong>MAs</strong> smooth noise and reveal underlying direction.</li>
+            <li><strong>RSI</strong> highlights stretched conditions that often mean-revert.</li>
+            <li><strong>MACD</strong> detects trend changes via moving-average crossovers.</li>
+            <li><strong>Volatility</strong> modulates confidence and expected move size.</li>
+            <li><strong>Volume</strong> validates price moves; abnormal activity can signal regime shifts.</li>
+            <li><strong>Cross-asset returns</strong> exploit correlation and leadership effects across related stocks.</li>
+            <li><strong>Calendar</strong> encodes systematic intraday/weekly patterns.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
