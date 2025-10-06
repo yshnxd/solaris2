@@ -648,8 +648,8 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
 with tab1:
     st.markdown('<h2 class="section-header">🏠 Dashboard Overview</h2>', unsafe_allow_html=True)
     
-    # Quick Stats Row
-    col1, col2, col3, col4 = st.columns(4)
+    # Quick Stats Row (3 cards)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown("""
@@ -686,27 +686,7 @@ with tab1:
     
     # Removed Backtest ROI card per request
     
-    # Quick Actions
-    st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">🚀 Quick Actions</h3>', unsafe_allow_html=True)
-    
-    action_col1, action_col2, action_col3 = st.columns(3)
-    
-    with action_col1:
-        if st.button("🎯 Generate Prediction", key="dashboard_pred", help="Run AI prediction"):
-            st.session_state.trigger_prediction = True
-            st.session_state.active_tab = "Predictions"
-            st.rerun()
-    
-    with action_col2:
-        if st.button("📊 View Analytics", key="dashboard_analytics", help="Check prediction history"):
-            st.session_state.trigger_evaluate = True
-            st.session_state.active_tab = "Analytics"
-            st.rerun()
-    
-    with action_col3:
-        if st.button("📈 Open Charts", key="dashboard_charts", help="View interactive charts"):
-            st.session_state.active_tab = "Charts"
-            st.rerun()
+    # Quick Actions removed
     
     # Real-Time Market Data (Dashboard only)
     st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📊 Real-Time Market Data</h3>', unsafe_allow_html=True)
@@ -1218,13 +1198,9 @@ with tab3:
                 <h4 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">🎯 Regression Metrics</h4>
             </div>
             """, unsafe_allow_html=True)
-            met_col1, met_col2, met_col3, met_col4 = st.columns(4)
+            met_col1, met_col4 = st.columns(2)
             with met_col1:
                 st.metric("MAE", f"${metrics_mae:.3f}" if metrics_mae is not None else "N/A")
-            with met_col2:
-                st.metric("RMSE", f"${metrics_rmse:.3f}" if metrics_rmse is not None else "N/A")
-            with met_col3:
-                st.metric("R²", f"{metrics_r2:.3f}" if metrics_r2 is not None else "N/A")
             with met_col4:
                 st.metric("MAPE", f"{metrics_mape:.2f}%" if metrics_mape is not None and not np.isnan(metrics_mape) else "N/A")
         
@@ -1276,13 +1252,9 @@ with tab3:
                             r2 = r2_score(y_true, y_pred)
                             mape = float(np.mean(np.abs((y_true - y_pred) / y_true)) * 100) if (y_true != 0).all() else np.nan
                             st.markdown("### Regression Metrics")
-                            acc_col1, acc_col2, acc_col3, acc_col4 = st.columns(4)
+                            acc_col1, acc_col4 = st.columns(2)
                             with acc_col1:
                                 st.metric("MAE", f"${mae:.3f}")
-                            with acc_col2:
-                                st.metric("RMSE", f"${rmse:.3f}")
-                            with acc_col3:
-                                st.metric("R²", f"{r2:.3f}")
                             with acc_col4:
                                 st.metric("MAPE", f"{mape:.2f}%" if not np.isnan(mape) else "N/A")
                 else:
@@ -1312,15 +1284,24 @@ with tab3:
         # Model comparison
         st.markdown("### Model Comparison")
         
-        model_data = {
-            'Model': ['CNN', 'LSTM', 'XGBoost', 'Ensemble'],
-            'Accuracy': [73.2, 71.8, 75.4, 78.1],
-            'Speed (ms)': [45, 52, 12, 35],
-            'Memory (MB)': [128, 156, 89, 245]
-        }
+        # Replace hardcoded accuracy with available metrics summary
+        _acc_df = pd.DataFrame()
+        if os.path.exists(PREDICTION_HISTORY_CSV):
+            try:
+                _hist = pd.read_csv(PREDICTION_HISTORY_CSV)
+                _eval = _hist.dropna(subset=['predicted_price','actual_price']) if {'predicted_price','actual_price'}.issubset(_hist.columns) else pd.DataFrame()
+                if not _eval.empty:
+                    _mae = mean_absolute_error(_eval['actual_price'].astype(float), _eval['predicted_price'].astype(float))
+                    _mape = float(np.mean(np.abs((_eval['actual_price'] - _eval['predicted_price']) / _eval['actual_price'])) * 100) if (_eval['actual_price'] != 0).all() else np.nan
+                    _acc_df = pd.DataFrame({
+                        'Metric': ['MAE', 'MAPE'],
+                        'Value': [f"${_mae:.3f}", f"{_mape:.2f}%" if not np.isnan(_mape) else 'N/A']
+                    })
+            except Exception:
+                pass
+        model_data = _acc_df if not _acc_df.empty else pd.DataFrame({'Metric': ['MAE','MAPE'], 'Value': ['N/A','N/A']})
         
-        model_df = pd.DataFrame(model_data)
-        st.dataframe(model_df, use_container_width=True)
+        st.dataframe(model_data, use_container_width=True)
         
         # Feature importance
         st.markdown("### Feature Importance")
@@ -1611,29 +1592,7 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
                 updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
                 if updated_df is not None:
                     st.success("Filled actual prices and updated prediction history CSV.")
-        ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
-        try:
-            log_df = pd.read_csv(PREDICTION_HISTORY_CSV)
-        except pd.errors.EmptyDataError:
-            log_df = pd.DataFrame(columns=show_cols)
-        for col in ["timestamp", "target_time"]:
-            if col in log_df.columns:
-                log_df[col] = pd.to_datetime(log_df[col], errors="coerce")
-        log_df = log_df.sort_values("timestamp", ascending=False)
-        for col in show_cols:
-            if col not in log_df.columns:
-                log_df[col] = np.nan
-        st.dataframe(log_df[show_cols], use_container_width=True)
-        if 'error_pct' in log_df.columns and log_df['error_pct'].notnull().any():
-            eval_rows = log_df[log_df['error_pct'].notnull()]
-            avg_abs_error = eval_rows['error_abs'].mean()
-            avg_pct_error = eval_rows['error_pct'].mean()
-            eval_count = len(eval_rows)
-            st.markdown("### Predictions Summary")
-            st.metric("Evaluated Predictions", eval_count)
-            st.metric("Average Absolute Error", f"${avg_abs_error:.3f}" if eval_count else "N/A")
-            st.metric("Average % Error", f"{avg_pct_error:.2f}%" if eval_count else "N/A")
-            st.progress(min(1, max(0, 1-avg_pct_error/10)) if eval_count else 0)
+        # Removed history table/summary from non-Analytics sections
 
 
 
