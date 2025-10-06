@@ -1947,3 +1947,178 @@ with tab6:
         """, unsafe_allow_html=True)
         st.latex(r"\Delta V_t=\tfrac{V_t-V_{t-1}}{V_{t-1}},\; \text{VMA}_{24}=\tfrac{1}{24}\sum_{i=0}^{23}V_{t-i}")
         st.markdown("- Compute: pct change + 24h mean\n- Use: confirm breakouts/exhaustion")
+
+    # Overview per user's requested theory content
+    st.markdown("""
+    <div class="glass-card">
+        <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 0.6rem;">SOLARIS: Next-hour return forecasting (overview)</h3>
+        <p style="color: rgba(255,255,255,0.85);">
+        SOLARIS predicts next-hour returns for a basket of equities using an ensemble of sequence and tabular learners. We collect hourly OHLCV, compute a compact set of technical, volume, volatility and calendar features, train sequence models (LSTM, CNN) plus an XGBoost tabular model, and combine their out-of-fold predictions with summary statistics in a lightweight meta-learner for robust, regime-aware forecasts.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 1 — Dataset & preprocessing
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>1 — Dataset & preprocessing</h4>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li><b>Source & scope</b>: Hourly OHLCV for 12 equities from Yahoo Finance (~2 years).
+                Align timestamps across assets to a single hourly index.</li>
+            <li><b>Missing data</b>: Forward-fill intra-day gaps; drop hours with no market data across all assets; flag daylight/holiday gaps.</li>
+            <li><b>Normalization</b>: Standardize features (z-score) using training-window stats only (no peeking).</li>
+            <li><b>Windows</b>: Sequence models use sliding windows of length L=128; tree model uses the latest aggregated feature vector.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 2 — Label
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>2 — Label</h4>
+        <div style="color: rgba(255,255,255,0.85);">Single-step, next-hour return (loss: MSE; optionally Huber for robustness):</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.latex(r"r_{t+1}=\frac{P_{t+1}-P_t}{P_t},\quad \hat P_{t+1}=P_t\,(1+\hat r_{t+1})")
+
+    # 3 — Feature engineering
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>3 — Feature engineering (compact & grouped)</h4>
+        <p style="color: rgba(255,255,255,0.85);">Group features by intention; compute per-asset, plus cross-asset summaries.</p>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li><b>Price / returns</b>: 1h, 6h, 24h returns; log-returns optional.</li>
+            <li><b>Momentum</b>: RSI(14); multi-horizon returns.</li>
+            <li><b>Trend</b>: SMA/EMA; MACD=EMA(12)-EMA(26); Signal=EMA9(MACD).</li>
+            <li><b>Volatility / risk</b>: Rolling standard deviation of 1h returns (6h/12h/24h windows).</li>
+            <li><b>Volume</b>: Volume pct-change and 24-hour mean volume (VMA24).</li>
+            <li><b>Calendar</b>: Hour-of-day, day-of-week (optionally cyclical sin/cos).</li>
+            <li><b>Cross-asset</b>: Peer returns and correlations; peer-group mean returns (e.g., over 6h/24h).</li>
+            <li><b>Summary stats</b>: Last-window mean/std/max/min of inputs for meta context.</li>
+        </ul>
+        <div style="color: rgba(255,255,255,0.8);">Keep features lean (~30–40 indicators). Log/clip heavy tails.</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Key formulas for features
+    st.latex(r"r_{t,\Delta}=\frac{P_t-P_{t-\Delta}}{P_{t-\Delta}}\quad\text{(returns)}")
+    st.latex(r"\text{RSI}=100-\frac{100}{1+RS},\; RS=\frac{\text{avg gain}_{14}}{\text{avg loss}_{14}}")
+    st.latex(r"\text{SMA}_t=\tfrac{1}{w}\sum_{i=0}^{w-1}P_{t-i},\; \text{EMA}_t=\alpha P_t+(1-\alpha)\,\text{EMA}_{t-1},\;\alpha=\tfrac{2}{w+1}")
+    st.latex(r"\sigma_{t,w}=\sqrt{\tfrac{1}{w-1}\sum_{i=0}^{w-1}(r_{t-i,1}-\bar r)^2}\quad\text{(rolling std)}")
+    st.latex(r"\Delta V_t=\tfrac{V_t-V_{t-1}}{V_{t-1}},\; \text{VMA}_{24}=\tfrac{1}{24}\sum_{i=0}^{23}V_{t-i}")
+
+    # 4 — Base models (short cards)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>4 — Base models (what they learn & why)</h4>
+        <p style="color: rgba(255,255,255,0.85);">Short cards: strengths and common architecture.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🔄 LSTM (sequence)</h5>
+            <div style="color: rgba(255,255,255,0.85);">Input: 128×features standardized window. 1–2 LSTM layers → Dense → \(\hat r_{t+1}\).</div>
+            <div style="color: rgba(255,255,255,0.8);">Pros: long-range dependencies. Cons: slower; needs regularization.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"(X * k)_t=\sum_{\tau=0}^{K-1}k_{\tau}X_{t-\tau}")
+    with b2:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🧩 CNN (temporal)</h5>
+            <div style="color: rgba(255,255,255,0.85);">Conv1D+BN+ReLU stacks → GlobalAvgPool → Dense → \(\hat r\).</div>
+            <div style="color: rgba(255,255,255,0.8);">Pros: faster, motif detection. Cons: limited long context unless dilated/deeper.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"(X * k)_t=\sum_{\tau=0}^{K-1}k_{\tau}X_{t-\tau}")
+    with b3:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🌳 XGBoost (tabular)</h5>
+            <div style="color: rgba(255,255,255,0.85);">Latest feature vector → boosted regression trees → \(\hat r\).</div>
+            <div style="color: rgba(255,255,255,0.8);">Pros: strong on heterogeneous tabular signals; Cons: weak on raw sequences.</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 5 — Meta-learner (ensemble)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>5 — Meta-learner (ensemble)</h4>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li><b>Inputs</b>: OOF predictions from CNN/LSTM/XGB + summary stats (mean/std/max/min) and volatility regime signals.</li>
+            <li><b>Model</b>: lightweight regressor (e.g., HistGradientBoosting).</li>
+            <li><b>Target</b>: minimize MSE on OOF sets (avoid leakage).</li>
+            <li><b>Purpose</b>: learn when to trust each base model (trending vs. choppy).</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 6 — Training & validation (condensed)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>6 — Training pipeline & validation</h4>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li><b>Splits</b>: time-based (walk-forward); rolling windows; expanding train.</li>
+            <li><b>Loss & optimizer</b>: MSE/Huber + Adam (NNs); regularized squared loss for XGBoost.</li>
+            <li><b>OOF & stacking</b>: k-fold time-series CV; train meta on OOF preds.</li>
+            <li><b>Regularization</b>: dropout/weight decay (NNs); lambda/alpha (XGBoost); optional input noise.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 7 — Evaluation & backtest (condensed)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>7 — Evaluation & backtest metrics</h4>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li><b>Prediction</b>: MAE / MSE on returns (R² with care).</li>
+            <li><b>Economic</b>: strategy P&L (sign/magnitude), Sharpe, max drawdown; costs/slippage.</li>
+            <li><b>Stability</b>: rank correlation over time; per-regime performance (high/low σ).</li>
+            <li><b>Robustness</b>: walk-forward, ensemble ablation, sensitivity to features, stress tests.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 8 — Deployment
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>8 — Deployment & inference</h4>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li><b>Inference</b>: build latest features → feed windows (LSTM/CNN) + tabular (XGB) → meta → \(\hat r_{t+1}\) → \(\hat P_{t+1}=P_t(1+\hat r)\).</li>
+            <li><b>Latency</b>: CNN/XGB fast; LSTM can use warm-start or distillation.</li>
+            <li><b>Monitoring</b>: data drift, model drift, P&L vs expected, feature distribution alerts.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 9 — Suggested website layout (brief)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>9 — Suggested website layout & UX</h4>
+        <ul style="color: rgba(255,255,255,0.85); line-height:1.7;">
+            <li>Hero + one-liner; model cards (LSTM | CNN | XGB).</li>
+            <li>Ensemble/pipeline diagram: Data → Features → Models → Meta → Forecast.</li>
+            <li>Key formulas (collapsible); data & reproducibility notes.</li>
+            <li>Backtest results (equity curve, Sharpe, drawdown) + per-regime breakdown.</li>
+            <li>Technical appendix: full features, params, training schedule; link to notebook.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 10 — Compact model card
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4>10 — Compact model card</h4>
+        <div style="color: rgba(255,255,255,0.85);">
+        <b>Model</b>: SOLARIS ensemble<br/>
+        <b>Inputs</b>: hourly OHLCV, engineered features (~34) + cross-asset stats<br/>
+        <b>Base learners</b>: LSTM(128-step), CNN(1D conv), XGBoost(tabular)<br/>
+        <b>Meta</b>: HistGradientBoosting on OOF preds + summary stats<br/>
+        <b>Label</b>: next-hour return \(r_{t+1}\) (MSE loss)<br/>
+        <b>Validation</b>: purged time-series CV; walk-forward backtest<br/>
+        <b>Primary risks</b>: lookahead bias, overfitting, regime shifts, transaction costs
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
