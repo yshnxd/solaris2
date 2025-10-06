@@ -1257,27 +1257,27 @@ with tab3:
                     st.markdown("### Recent Predictions")
                     recent_display = history_df.head(10)[show_cols]
                     st.dataframe(recent_display, use_container_width=True)
-                    
-        # Summary statistics using regression metrics
-        if 'predicted_price' in history_df.columns and 'actual_price' in history_df.columns:
-            eval_rows = history_df.dropna(subset=['predicted_price', 'actual_price'])
-            if not eval_rows.empty:
-                y_true = eval_rows['actual_price'].astype(float)
-                y_pred = eval_rows['predicted_price'].astype(float)
-                mae = mean_absolute_error(y_true, y_pred)
-                rmse = math.sqrt(mean_squared_error(y_true, y_pred))
-                r2 = r2_score(y_true, y_pred)
-                mape = float(np.mean(np.abs((y_true - y_pred) / y_true)) * 100) if (y_true != 0).all() else np.nan
-                st.markdown("### Regression Metrics")
-                acc_col1, acc_col2, acc_col3, acc_col4 = st.columns(4)
-                with acc_col1:
-                    st.metric("MAE", f"${mae:.3f}")
-                with acc_col2:
-                    st.metric("RMSE", f"${rmse:.3f}")
-                with acc_col3:
-                    st.metric("R²", f"{r2:.3f}")
-                with acc_col4:
-                    st.metric("MAPE", f"{mape:.2f}%" if not np.isnan(mape) else "N/A")
+
+                    # Summary statistics using regression metrics
+                    if 'predicted_price' in history_df.columns and 'actual_price' in history_df.columns:
+                        eval_rows = history_df.dropna(subset=['predicted_price', 'actual_price'])
+                        if not eval_rows.empty:
+                            y_true = eval_rows['actual_price'].astype(float)
+                            y_pred = eval_rows['predicted_price'].astype(float)
+                            mae = mean_absolute_error(y_true, y_pred)
+                            rmse = math.sqrt(mean_squared_error(y_true, y_pred))
+                            r2 = r2_score(y_true, y_pred)
+                            mape = float(np.mean(np.abs((y_true - y_pred) / y_true)) * 100) if (y_true != 0).all() else np.nan
+                            st.markdown("### Regression Metrics")
+                            acc_col1, acc_col2, acc_col3, acc_col4 = st.columns(4)
+                            with acc_col1:
+                                st.metric("MAE", f"${mae:.3f}")
+                            with acc_col2:
+                                st.metric("RMSE", f"${rmse:.3f}")
+                            with acc_col3:
+                                st.metric("R²", f"{r2:.3f}")
+                            with acc_col4:
+                                st.metric("MAPE", f"{mape:.2f}%" if not np.isnan(mape) else "N/A")
                 else:
                     st.markdown("""
                     <div class="glass-card" style="text-align: center; padding: 2rem;">
