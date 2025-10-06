@@ -889,9 +889,6 @@ show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average C
 with tab2:
     st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
 
-selected_ticker = st.sidebar.text_input("Stock Ticker Symbol", st.session_state.selected_ticker, help="Enter a valid stock ticker symbol (e.g., AAPL, MSFT, TSLA)").upper()
-st.session_state.selected_ticker = selected_ticker
-days_history = st.session_state.days_history
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
 if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
