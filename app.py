@@ -1632,14 +1632,16 @@ with tab6:
     </div>
     """, unsafe_allow_html=True)
     st.markdown("**Mathematical Formulation**")
-    st.latex(r"\begin{aligned}
+    st.latex(r"""
+    \begin{aligned}
     &\text{Input sequence: } X = (x_{t-L+1},\dots,x_t) \\
     &\text{LSTM cell: } \\
     &f_t = \sigma(W_f [h_{t-1}, x_t] + b_f),\quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i),\\
     &\tilde{c}_t = \tanh(W_c [h_{t-1}, x_t] + b_c),\quad c_t = f_t \odot c_{t-1} + i_t \odot \tilde{c}_t,\\
     &o_t = \sigma(W_o [h_{t-1}, x_t] + b_o),\quad h_t = o_t \odot \tanh(c_t) \\
     &\text{Output: } \hat{y}_{t+1} = W_y h_t + b_y
-    \end{aligned}")
+    \end{aligned}
+    """)
     st.markdown("**Loss / Optimization**: Mean Squared Error (MSE), optimized via backpropagation through time (BPTT) and gradient descent (e.g., Adam).")
     st.markdown("**Pros**: Good for sequential patterns, regime shifts; **Cons**: Slower to train, can overfit without regularization.")
     st.markdown("**Why for stocks**: Captures momentum, mean-reversion, and intraday cycles across windows.")
