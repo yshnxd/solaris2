@@ -380,7 +380,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="pulse">
-    <h2 class="sub-header">✨ Next-Gen AI Stock Prediction Engine ✨</h2>
+    <h2 class="sub-header">✨ Machine Learner-Powered Stock Prediction Model ✨</h2>
 </div>
 """, unsafe_allow_html=True)
 
