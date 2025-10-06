@@ -1852,3 +1852,98 @@ with tab6:
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+    # Compact Model Cards (side-by-side)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem; text-align:center;">🧠 Base Models (At-a-glance)</h4>
+    </div>
+    """, unsafe_allow_html=True)
+    mcol1, mcol2, mcol3 = st.columns(3)
+    with mcol1:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🔄 LSTM</h5>
+            <div style="color: rgba(255,255,255,0.85);">Memory cell <em>c_t</em>, hidden <em>h_t</em> over 128 steps. Gates f,i,o control information flow.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\hat r=W_y h_t+b_y")
+    with mcol2:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🧩 CNN</h5>
+            <div style="color: rgba(255,255,255,0.85);">Conv1D filters detect local motifs; pooling summarizes; Dense outputs \(\hat r\).</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"(X * k)_t = \sum_{\tau=0}^{K-1} k_{\tau}X_{t-\tau}")
+    with mcol3:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🌳 XGBoost</h5>
+            <div style="color: rgba(255,255,255,0.85);">Boosted trees on tabular features with regularization.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\hat r(x)=\sum_m \gamma_m T_m(x)")
+
+    # Indicator Cards Grid (separate boxes)
+    st.markdown("""
+    <div class="glass-card" style="margin-top:1rem;">
+        <h4 style="margin-bottom:0.5rem; text-align:center;">📐 Indicators (Explained)</h4>
+    </div>
+    """, unsafe_allow_html=True)
+    icol1, icol2 = st.columns(2)
+    with icol1:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>📈 SMA</h5>
+            <div style="color: rgba(255,255,255,0.85);">Average of last w closes (trend smoothing).</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\text{SMA}_t = \tfrac{1}{w}\sum_{i=0}^{w-1}P_{t-i}")
+        st.markdown("- Compute: rolling mean\n- Use: baseline trend")
+
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🏃 RSI (14)</h5>
+            <div style="color: rgba(255,255,255,0.85);">Relative strength of gains vs losses.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\text{RSI}=100-\frac{100}{1+RS},\; RS=\frac{\text{avg gain}_{14}}{\text{avg loss}_{14}}")
+        st.markdown("- Compute: smoothed gains/losses\n- Use: stretch / mean-reversion")
+
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>🌪️ Volatility</h5>
+            <div style="color: rgba(255,255,255,0.85);">Std of recent 1h returns.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\sigma_{t,w} = \sqrt{\tfrac{1}{w-1}\sum_{i=0}^{w-1}(r_{t-i,1}-\bar r)^2}")
+        st.markdown("- Compute: rolling std\n- Use: regime/risk context")
+
+    with icol2:
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>📈 EMA</h5>
+            <div style="color: rgba(255,255,255,0.85);">Exponential weighting of recent prices.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\text{EMA}_t=\alpha P_t+(1-\alpha)\,\text{EMA}_{t-1},\; \alpha=\tfrac{2}{w+1}")
+        st.markdown("- Compute: ewm\n- Use: responsive trend")
+
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>📐 MACD & Signal</h5>
+            <div style="color: rgba(255,255,255,0.85);">Fast minus slow EMA and its EMA.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\text{MACD}=\text{EMA}_{12}(P)-\text{EMA}_{26}(P),\; \text{Signal}=\text{EMA}_9(\text{MACD})")
+        st.markdown("- Compute: ta.MACD\n- Use: turning points")
+
+        st.markdown("""
+        <div class="glass-card" style="margin-top:0.5rem;">
+            <h5>📦 Volume Δ & VMA</h5>
+            <div style="color: rgba(255,255,255,0.85);">Flow confirmation via volume.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.latex(r"\Delta V_t=\tfrac{V_t-V_{t-1}}{V_{t-1}},\; \text{VMA}_{24}=\tfrac{1}{24}\sum_{i=0}^{23}V_{t-i}")
+        st.markdown("- Compute: pct change + 24h mean\n- Use: confirm breakouts/exhaustion")
