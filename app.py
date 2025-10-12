@@ -5,18 +5,14 @@ import pandas as pd
 import plotly.graph_objs as go
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.models import load_model
-import xgboost as xgb
 import pickle
+import random
 import warnings
 warnings.filterwarnings("ignore")
 
-# Set deterministic seed for reproducibility
-import random
-import tensorflow as tf
+# Deterministic random seed for reproducibility
 np.random.seed(42)
 random.seed(42)
-tf.random.set_seed(42)
 
 st.set_page_config(
     page_title="📈 StockWise: Hybrid AI Stock Prediction System",
@@ -28,8 +24,10 @@ st.set_page_config(
 # ---- Load Models and Scaler ----
 @st.cache_resource
 def load_models_and_scaler():
-    cnn_model = load_model("cnn_model.h5")
-    lstm_model = load_model("lstm_model.h5")
+    with open("cnn_model.pkl", "rb") as f:
+        cnn_model = pickle.load(f)
+    with open("lstm_model.pkl", "rb") as f:
+        lstm_model = pickle.load(f)
     with open("xgb_model.pkl", "rb") as f:
         xgb_model = pickle.load(f)
     with open("meta_learner.pkl", "rb") as f:
@@ -148,14 +146,9 @@ def predict_next_hour(ticker="AAPL", horizon=1):
         X = latest_features[feature_names].values.reshape(1, -1)
         X_scaled = scaler.transform(X)
 
-        # CNN expects 2D shape (samples, features)
-        cnn_pred = cnn_model.predict(X_scaled, verbose=0)[0, 0]
-
-        # LSTM expects 3D shape (samples, timesteps, features)
-        # Here, we repeat the feature vector for timesteps=1
-        lstm_pred = lstm_model.predict(X_scaled.reshape(1, 1, -1), verbose=0)[0, 0]
-
-        # XGBoost expects 2D shape
+        # All models are .pkl: sklearn/xgboost compatible
+        cnn_pred = cnn_model.predict(X_scaled)[0]
+        lstm_pred = lstm_model.predict(X_scaled)[0]
         xgb_pred = xgb_model.predict(X_scaled)[0]
 
         base_preds = np.array([cnn_pred, lstm_pred, xgb_pred]).reshape(1, -1)
@@ -294,4 +287,4 @@ else:
     st.info("Enter a ticker and click 🔮 Predict to get started.", icon="🔎")
 
 st.markdown("---")
-st.caption("Powered by Streamlit, yfinance, TensorFlow, XGBoost, scikit-learn, and Plotly. © 2025 StockWise. 🚀")
+st.caption("Powered by Streamlit, yfinance, scikit-learn, xgboost, and Plotly. © 2025 StockWise. 🚀")
