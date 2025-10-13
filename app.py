@@ -1037,12 +1037,12 @@ with tab3:
     </div>
     """, unsafe_allow_html=True)
         
-        with chart_col1:
+    with chart_col1:
             st.markdown("### 📊 Chart Settings")
             chart_interval = st.selectbox("Time Interval", ["1 Hour", "1 Day"], index=0)
             chart_period = st.selectbox("Chart Period", ["30 days", "90 days", "1 year"], index=1)
         
-        with chart_col2:
+        With chart_col2:
             st.markdown("### 🎨 Display Options")
             show_volume = st.checkbox("Show Volume", value=True)
             show_candlesticks = st.checkbox("Show Candlesticks", value=True)
