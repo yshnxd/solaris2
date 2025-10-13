@@ -324,25 +324,36 @@ st.markdown("""
         }
     }
     
-    /* Ensure proper sizing for charts and predictions */
+    /* Ensure proper sizing for charts and predictions - AGGRESSIVE */
     .stPlotlyChart {
         width: 100% !important;
-        height: 800px !important;
-        min-height: 800px !important;
+        height: 900px !important;
+        min-height: 900px !important;
         max-height: none !important;
+        flex-shrink: 0 !important;
+        flex-grow: 1 !important;
     }
     
     .stPlotlyChart > div {
         width: 100% !important;
-        height: 800px !important;
-        min-height: 800px !important;
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
     }
     
     /* Fix plotly container sizing */
     .js-plotly-plot {
         width: 100% !important;
-        height: 800px !important;
-        min-height: 800px !important;
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
+    }
+    
+    /* Force chart to maintain size */
+    .plotly {
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
     }
     
     .stMetric {
@@ -396,6 +407,33 @@ st.markdown("""
         position: relative;
         z-index: 2;
         clear: both;
+    }
+    
+    /* AGGRESSIVE chart sizing overrides */
+    div[data-testid="stPlotlyChart"] {
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
+    }
+    
+    div[data-testid="stPlotlyChart"] > div {
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
+    }
+    
+    /* Override any Streamlit container constraints */
+    .stPlotlyChart .plot-container {
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
+    }
+    
+    /* Force plotly to respect our sizing */
+    .plotly-graph-div {
+        height: 900px !important;
+        min-height: 900px !important;
+        max-height: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -947,59 +985,67 @@ else:
             ema_20 = main_ticker_data['Close'].ewm(span=20).mean()
             fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_20, name='EMA 20', line=dict(color='#667eea', width=2, dash='dash')))
         
-        # Update layout with proper sizing and spacing
+        # Update layout with aggressive sizing to prevent compression
         fig.update_layout(
             title=dict(
                 text=f"{selected_ticker} Price Chart",
-                font=dict(size=20, color='white'),
+                font=dict(size=18, color='white'),
                 x=0.5,
-                xanchor='center'
+                xanchor='center',
+                y=0.95
             ),
             xaxis_title="Time",
             yaxis_title="Price ($)",
             template="plotly_dark",
-            height=800,
+            height=900,
             width=None,
             showlegend=True,
             legend=dict(
                 orientation="h",
-                yanchor="bottom",
-                y=-0.15,
+                yanchor="top",
+                y=-0.05,
                 xanchor="center",
                 x=0.5,
-                font=dict(size=12)
+                font=dict(size=11),
+                bgcolor='rgba(0,0,0,0.5)',
+                bordercolor='rgba(255,255,255,0.2)'
             ),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white', size=14),
+            font=dict(color='white', size=13),
             xaxis=dict(
                 gridcolor='rgba(255,255,255,0.1)',
                 showgrid=True,
-                title_font=dict(size=16),
-                tickfont=dict(size=12),
-                rangeslider=dict(visible=False)
+                title_font=dict(size=14),
+                tickfont=dict(size=11),
+                rangeslider=dict(visible=False),
+                automargin=True
             ),
             yaxis=dict(
                 gridcolor='rgba(255,255,255,0.1)',
                 showgrid=True,
-                title_font=dict(size=16),
-                tickfont=dict(size=12),
-                fixedrange=False
+                title_font=dict(size=14),
+                tickfont=dict(size=11),
+                fixedrange=False,
+                automargin=True
             ),
-            margin=dict(l=80, r=80, t=100, b=100),
-            autosize=True
+            margin=dict(l=60, r=60, t=60, b=60),
+            autosize=True,
+            bargap=0.1
         )
         
-        # Display the chart in its own container
+        # Display the chart in its own container with explicit sizing
         st.plotly_chart(fig, use_container_width=True, config={
             'displayModeBar': True,
             'displaylogo': False,
             'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+            'responsive': True,
+            'staticPlot': False,
             'toImageButtonOptions': {
                 'format': 'png',
                 'filename': f'{selected_ticker}_chart',
-                'height': 800,
-                'width': 1200,
+                'height': 900,
+                'width': 1400,
                 'scale': 2
             }
         })
@@ -1007,8 +1053,8 @@ else:
         # Close chart container
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Add spacing between chart and predictions
-        st.markdown("<div style='height: 3rem;'></div>", unsafe_allow_html=True)
+        # Add minimal spacing between chart and predictions
+        st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
         
         # AI Predictions Section
         st.markdown('<div class="prediction-container">', unsafe_allow_html=True)
