@@ -388,7 +388,7 @@ show_rsi = st.sidebar.checkbox("📊 RSI (14)", value=False, help="Relative Stre
 show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average Convergence Divergence")
 
 # Main Navigation Tabs
-tab1, tab2, tab3 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📚 Theory"])
+tab1, tab2, tab3 = st.tabs(["🏠 Dashboard", "📚 Prediction History", "📚 Theory"])
 
 PREDICTION_HISTORY_CSV = "prediction_history.csv"
 show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
@@ -698,22 +698,6 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    # Quick Actions
-    st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">🚀 Quick Actions</h3>', unsafe_allow_html=True)
-    
-    action_col1, action_col2, action_col3 = st.columns(3)
-    
-    with action_col1:
-        if st.button("🎯 Generate Prediction", key="dashboard_pred", help="Run AI prediction"):
-            st.info("🎯 Navigate to the Predictions tab to generate AI predictions!")
-    
-    with action_col2:
-        if st.button("📊 View Analytics", key="dashboard_analytics", help="Check prediction history"):
-            st.info("📊 Analytics features are available in the Predictions tab!")
-    
-    with action_col3:
-        if st.button("📈 Open Charts", key="dashboard_charts", help="View interactive charts"):
-            st.info("📈 Charts are displayed in the Dashboard tab!")
 
     # Recent Activity
     st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📋 Recent Activity</h3>', unsafe_allow_html=True)
@@ -770,12 +754,12 @@ with tab1:
         """, unsafe_allow_html=True)
 
     # Real-Time Market Data and Charts (only in Dashboard)
-    st.markdown('<h2 class="section-header">📊 Real-Time Market Data</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="section-header">📊 Live Stock Market Graph</h2>', unsafe_allow_html=True)
     
     # Fetch real-time data
-main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
+    main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
-if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
+    if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
         st.markdown("""
         <div class="glass-card" style="text-align: center; padding: 3rem;">
             <div style="font-size: 4rem; margin-bottom: 1rem;">📈</div>
@@ -785,49 +769,49 @@ if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) <
             </p>
         </div>
         """, unsafe_allow_html=True)
-else:
-    latest_data = main_ticker_data.iloc[-1]
-    current_price = latest_data['Close']
-    current_time = latest_data.name
-    
-    # Enhanced Metrics Display
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        current_price_formatted = f"${current_price:.2f}"
-        st.markdown(f"""
-        <div class="glass-card metric-card">
-            <div style="text-align: center;">
-                <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
-                    {current_price_formatted}
-                </div>
-                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
-                    💰 Current Price
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
-        change = current_price - prev_close
-        change_pct = (change / prev_close) * 100
-        change_color = "#00ff88" if change >= 0 else "#ff6b6b"
-        change_icon = "📈" if change >= 0 else "📉"
-        change_formatted = f"{change:+.2f}"
-        change_pct_formatted = f"{change_pct:+.2f}%"
+    else:
+        latest_data = main_ticker_data.iloc[-1]
+        current_price = latest_data['Close']
+        current_time = latest_data.name
         
-        st.markdown(f"""
-        <div class="glass-card metric-card">
-            <div style="text-align: center;">
-                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{change_icon}</div>
-                <div style="font-size: 1.5rem; color: {change_color}; font-weight: 900;">{change_formatted}</div>
-                <div style="font-size: 1.1rem; color: {change_color}; font-weight: 600;">{change_pct_formatted}</div>
-                <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">24h Change</div>
+        # Enhanced Metrics Display
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            current_price_formatted = f"${current_price:.2f}"
+            st.markdown(f"""
+            <div class="glass-card metric-card">
+                <div style="text-align: center;">
+                    <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
+                        {current_price_formatted}
+                    </div>
+                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
+                        💰 Current Price
+                    </div>
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
+            change = current_price - prev_close
+            change_pct = (change / prev_close) * 100
+            change_color = "#00ff88" if change >= 0 else "#ff6b6b"
+            change_icon = "📈" if change >= 0 else "📉"
+            change_formatted = f"{change:+.2f}"
+            change_pct_formatted = f"{change_pct:+.2f}%"
+            
+            st.markdown(f"""
+            <div class="glass-card metric-card">
+                <div style="text-align: center;">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{change_icon}</div>
+                    <div style="font-size: 1.5rem; color: {change_color}; font-weight: 900;">{change_formatted}</div>
+                    <div style="font-size: 1.1rem; color: {change_color}; font-weight: 600;">{change_pct_formatted}</div>
+                    <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">24h Change</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
         with col3:
             volume = latest_data['Volume']
             volume_formatted = f"{volume:,.0f}"
@@ -840,35 +824,399 @@ else:
                 </div>
             </div>
             """, unsafe_allow_html=True)
+        
+        # Interactive Chart
+        st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📈 Interactive Price Chart</h3>', unsafe_allow_html=True)
+        
+        # Create the chart
+        fig = go.Figure()
+        
+        # Add candlestick chart
+        fig.add_trace(go.Candlestick(
+            x=main_ticker_data.index,
+            open=main_ticker_data['Open'],
+            high=main_ticker_data['High'],
+            low=main_ticker_data['Low'],
+            close=main_ticker_data['Close'],
+            name="Price",
+            increasing_line_color='#00ff88',
+            decreasing_line_color='#ff6b6b'
+        ))
+        
+        # Add moving averages based on user selection
+        if "SMA 5" in overlay_options:
+            sma_5 = main_ticker_data['Close'].rolling(window=5).mean()
+            fig.add_trace(go.Scatter(x=main_ticker_data.index, y=sma_5, name='SMA 5', line=dict(color='#667eea', width=2)))
+        
+        if "SMA 10" in overlay_options:
+            sma_10 = main_ticker_data['Close'].rolling(window=10).mean()
+            fig.add_trace(go.Scatter(x=main_ticker_data.index, y=sma_10, name='SMA 10', line=dict(color='#764ba2', width=2)))
+        
+        if "SMA 20" in overlay_options:
+            sma_20 = main_ticker_data['Close'].rolling(window=20).mean()
+            fig.add_trace(go.Scatter(x=main_ticker_data.index, y=sma_20, name='SMA 20', line=dict(color='#f093fb', width=2)))
+        
+        if "EMA 5" in overlay_options:
+            ema_5 = main_ticker_data['Close'].ewm(span=5).mean()
+            fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_5, name='EMA 5', line=dict(color='#00ff88', width=2, dash='dash')))
+        
+        if "EMA 10" in overlay_options:
+            ema_10 = main_ticker_data['Close'].ewm(span=10).mean()
+            fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_10, name='EMA 10', line=dict(color='#ff6b6b', width=2, dash='dash')))
+        
+        if "EMA 20" in overlay_options:
+            ema_20 = main_ticker_data['Close'].ewm(span=20).mean()
+            fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_20, name='EMA 20', line=dict(color='#667eea', width=2, dash='dash')))
+        
+        # Update layout
+        fig.update_layout(
+            title=f"{selected_ticker} Price Chart",
+            xaxis_title="Time",
+            yaxis_title="Price ($)",
+            template="plotly_dark",
+            height=600,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white'),
+            xaxis=dict(
+                gridcolor='rgba(255,255,255,0.1)',
+                showgrid=True
+            ),
+            yaxis=dict(
+                gridcolor='rgba(255,255,255,0.1)',
+                showgrid=True
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # AI Predictions Section
+        st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
+        
+        # Prediction button
+        if st.button("🎯 Generate AI Prediction", key="main_prediction", help="Run AI prediction for selected stock"):
+            with st.spinner("🤖 Running AI models..."):
+                try:
+                    # Fetch cross-asset data
+                    cross_data = fetch_cross_assets(main_ticker_data.index, days_history, selected_ticker)
+                    
+                    # Create features
+                    features = create_features_for_app(selected_ticker, main_ticker_data, cross_data)
+                    
+                    if features is not None and len(features) >= SEQ_LEN:
+                        # Make prediction
+                        predicted_price, pred_change_pct, votes, confidence = predict_with_models(
+                            features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model
+                        )
+                        
+                        if predicted_price is not None:
+                            # Display prediction results
+                            st.markdown("""
+                            <div class="glass-card" style="margin: 2rem 0;">
+                                <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem;">🎯 AI Prediction Results</h3>
+                            """, unsafe_allow_html=True)
+                            
+                            # Prediction metrics
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Current Price", f"${current_price:.2f}")
+                            
+                            with col2:
+                                st.metric("Predicted Price", f"${predicted_price:.2f}")
+                            
+                            with col3:
+                                st.metric("Expected Change", f"{pred_change_pct:+.2f}%")
+                            
+                            with col4:
+                                st.metric("Confidence", f"{confidence:.1f}%")
+                            
+                            # Model votes
+                            st.markdown('<h4 style="color: rgba(255, 255, 255, 0.9); margin: 1rem 0;">🤖 Model Consensus</h4>', unsafe_allow_html=True)
+                            
+                            vote_col1, vote_col2, vote_col3 = st.columns(3)
+                            
+                            with vote_col1:
+                                vote_color = "#00ff88" if votes["CNN"] == "UP" else "#ff6b6b"
+                                st.markdown(f"""
+                                <div class="glass-card metric-card">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🧩</div>
+                                        <div style="font-size: 1.2rem; color: {vote_color}; font-weight: 700;">CNN: {votes["CNN"]}</div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            with vote_col2:
+                                vote_color = "#00ff88" if votes["LSTM"] == "UP" else "#ff6b6b"
+                                st.markdown(f"""
+                                <div class="glass-card metric-card">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🔄</div>
+                                        <div style="font-size: 1.2rem; color: {vote_color}; font-weight: 700;">LSTM: {votes["LSTM"]}</div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            with vote_col3:
+                                vote_color = "#00ff88" if votes["XGBoost"] == "UP" else "#ff6b6b"
+                                st.markdown(f"""
+                                <div class="glass-card metric-card">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🌳</div>
+                                        <div style="font-size: 1.2rem; color: {vote_color}; font-weight: 700;">XGBoost: {votes["XGBoost"]}</div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Save prediction to history
+                            target_time = datetime.now() + timedelta(hours=1)
+                            prediction_record = {
+                                'timestamp': datetime.now(),
+                                'ticker': selected_ticker,
+                                'current_price': current_price,
+                                'predicted_price': predicted_price,
+                                'target_time': target_time,
+                                'actual_price': None,
+                                'error_pct': None,
+                                'error_abs': None,
+                                'confidence': confidence,
+                                'signal': 'BUY' if pred_change_pct > 0.25 else 'SELL' if pred_change_pct < -0.25 else 'HOLD'
+                            }
+                            
+                            # Append to CSV
+                            ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
+                            df = pd.read_csv(PREDICTION_HISTORY_CSV)
+                            df = pd.concat([df, pd.DataFrame([prediction_record])], ignore_index=True)
+                            df.to_csv(PREDICTION_HISTORY_CSV, index=False)
+                            
+                            st.success("✅ Prediction saved to history!")
+                            st.markdown("</div>", unsafe_allow_html=True)
+                            
+                        else:
+                            st.error("❌ Failed to generate prediction. Please check your data.")
+                    else:
+                        st.error("❌ Insufficient data for prediction. Need at least 128 data points.")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error generating prediction: {str(e)}")
+        
+        # Technical Indicators Section
+        if show_rsi or show_macd:
+            st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📊 Technical Indicators</h3>', unsafe_allow_html=True)
+            
+            if show_rsi:
+                # RSI Chart
+                rsi_values = ta.momentum.RSIIndicator(main_ticker_data['Close'], window=14).rsi()
+                fig_rsi = go.Figure()
+                fig_rsi.add_trace(go.Scatter(x=main_ticker_data.index, y=rsi_values, name='RSI', line=dict(color='#667eea')))
+                fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)")
+                fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold (30)")
+                fig_rsi.update_layout(
+                    title="RSI (14)",
+                    yaxis_title="RSI",
+                    template="plotly_dark",
+                    height=300,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white')
+                )
+                st.plotly_chart(fig_rsi, use_container_width=True)
+            
+            if show_macd:
+                # MACD Chart
+                macd_indicator = ta.trend.MACD(main_ticker_data['Close'])
+                macd_line = macd_indicator.macd()
+                signal_line = macd_indicator.macd_signal()
+                histogram = macd_indicator.macd_diff()
+                
+                fig_macd = go.Figure()
+                fig_macd.add_trace(go.Scatter(x=main_ticker_data.index, y=macd_line, name='MACD', line=dict(color='#00ff88')))
+                fig_macd.add_trace(go.Scatter(x=main_ticker_data.index, y=signal_line, name='Signal', line=dict(color='#ff6b6b')))
+                fig_macd.add_trace(go.Bar(x=main_ticker_data.index, y=histogram, name='Histogram', marker_color='#667eea'))
+                fig_macd.update_layout(
+                    title="MACD",
+                    yaxis_title="MACD",
+                    template="plotly_dark",
+                    height=300,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white')
+                )
+                st.plotly_chart(fig_macd, use_container_width=True)
 
-# Predictions Tab
+# Prediction History Tab
 with tab2:
-    st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="section-header">📚 Prediction History</h2>', unsafe_allow_html=True)
     
-    # Fetch data for predictions
-    main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
-
-    if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
-        st.markdown("""
-        <div style="background: rgba(255, 107, 107, 0.1); border: 2px solid rgba(255, 107, 107, 0.3); border-radius: 15px; padding: 2rem; text-align: center; backdrop-filter: blur(10px);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
-            <h3 style="color: #ff6b6b; margin-bottom: 1rem;">No Data Available</h3>
-            <p style="color: rgba(255, 255, 255, 0.9); line-height: 1.6; margin: 0;">
-                No or insufficient data found for ticker: <strong>{selected_ticker}</strong><br>
-                Please check the symbol or try another stock.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Load and display prediction history
+    if os.path.exists(PREDICTION_HISTORY_CSV):
+        try:
+            history_df = pd.read_csv(PREDICTION_HISTORY_CSV)
+            if not history_df.empty:
+                # Convert timestamp columns
+                for col in ['timestamp', 'target_time']:
+                    if col in history_df.columns:
+                        history_df[col] = pd.to_datetime(history_df[col], errors='coerce')
+                
+                # Sort by timestamp
+                history_df = history_df.sort_values('timestamp', ascending=False)
+                
+                # Display summary metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_predictions = len(history_df)
+                    st.markdown(f"""
+                    <div class="glass-card metric-card">
+                        <div style="text-align: center;">
+                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📊</div>
+                            <div style="font-size: 1.5rem; color: #667eea; font-weight: 900;">{total_predictions}</div>
+                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Total Predictions</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    buy_signals = len(history_df[history_df['signal'] == 'BUY'])
+                    st.markdown(f"""
+                    <div class="glass-card metric-card">
+                        <div style="text-align: center;">
+                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📈</div>
+                            <div style="font-size: 1.5rem; color: #00ff88; font-weight: 900;">{buy_signals}</div>
+                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Buy Signals</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    sell_signals = len(history_df[history_df['signal'] == 'SELL'])
+                    st.markdown(f"""
+                    <div class="glass-card metric-card">
+                        <div style="text-align: center;">
+                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📉</div>
+                            <div style="font-size: 1.5rem; color: #ff6b6b; font-weight: 900;">{sell_signals}</div>
+                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Sell Signals</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col4:
+                    avg_confidence = history_df['confidence'].mean() if 'confidence' in history_df.columns else 0
+                    st.markdown(f"""
+                    <div class="glass-card metric-card">
+                        <div style="text-align: center;">
+                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎯</div>
+                            <div style="font-size: 1.5rem; color: #f093fb; font-weight: 900;">{avg_confidence:.1f}%</div>
+                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Avg Confidence</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Action buttons
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("🔄 Refresh Actual Prices", help="Update actual prices for completed predictions"):
+                        with st.spinner("Updating actual prices..."):
+                            updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
+                            st.success("✅ Actual prices updated!")
+                            st.rerun()
+                
+                with col2:
+                    if st.button("📊 View Detailed Table", help="Show detailed prediction history"):
+                        st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📋 Detailed Prediction History</h3>', unsafe_allow_html=True)
+                        
+                        # Format the dataframe for display
+                        display_df = history_df.copy()
+                        display_df['timestamp'] = display_df['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                        display_df['target_time'] = display_df['target_time'].dt.strftime('%Y-%m-%d %H:%M')
+                        
+                        # Format numeric columns
+                        for col in ['current_price', 'predicted_price', 'actual_price']:
+                            if col in display_df.columns:
+                                display_df[col] = display_df[col].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "N/A")
+                        
+                        for col in ['error_pct', 'confidence']:
+                            if col in display_df.columns:
+                                display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+                        
+                        for col in ['error_abs']:
+                            if col in display_df.columns:
+                                display_df[col] = display_df[col].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "N/A")
+                        
+                        st.dataframe(display_df, use_container_width=True)
+                
+                # Recent predictions display
+                st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">🕒 Recent Predictions</h3>', unsafe_allow_html=True)
+                
+                recent_predictions = history_df.head(10)
+                
+                for _, row in recent_predictions.iterrows():
+                    signal_color = "#00ff88" if row.get('signal') == "BUY" else "#ff6b6b" if row.get('signal') == "SELL" else "#667eea"
+                    confidence_color = "#00ff88" if row.get('confidence', 0) > 70 else "#ff6b6b" if row.get('confidence', 0) < 50 else "#667eea"
+                    
+                    st.markdown(f"""
+                    <div class="glass-card" style="margin: 1rem 0; padding: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.2rem; color: rgba(255, 255, 255, 0.9); font-weight: 700;">{row.get('ticker', 'N/A')}</div>
+                            <div style="font-size: 1.1rem; color: {signal_color}; font-weight: 700; padding: 0.5rem 1rem; background: rgba(255, 255, 255, 0.1); border-radius: 20px;">{row.get('signal', 'N/A')}</div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Current Price</div>
+                                <div style="color: #00ff88; font-weight: 600;">${row.get('current_price', 0):.2f}</div>
+                            </div>
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Predicted Price</div>
+                                <div style="color: #667eea; font-weight: 600;">${row.get('predicted_price', 0):.2f}</div>
+                            </div>
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Actual Price</div>
+                                <div style="color: #f093fb; font-weight: 600;">${row.get('actual_price', 0):.2f if pd.notna(row.get('actual_price')) else 'N/A'}</div>
+                            </div>
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Confidence</div>
+                                <div style="color: {confidence_color}; font-weight: 600;">{row.get('confidence', 0):.1f}%</div>
+                            </div>
+                        </div>
+                        <div style="color: rgba(255, 255, 255, 0.6); font-size: 0.9rem;">
+                            Predicted: {row.get('timestamp', 'N/A')} | Target: {row.get('target_time', 'N/A')}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+            else:
+                st.markdown("""
+                <div class="glass-card" style="text-align: center; padding: 3rem;">
+                    <div style="font-size: 4rem; margin-bottom: 1rem;">📊</div>
+                    <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">No Prediction History</h3>
+                    <p style="color: rgba(255, 255, 255, 0.7);">
+                        Generate your first prediction in the Dashboard tab to see history here.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+        except Exception as e:
+            st.error(f"Error loading prediction history: {str(e)}")
     else:
         st.markdown("""
         <div class="glass-card" style="text-align: center; padding: 3rem;">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">🎯</div>
-            <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">AI Predictions</h3>
+            <div style="font-size: 4rem; margin-bottom: 1rem;">📊</div>
+            <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">No Prediction History</h3>
             <p style="color: rgba(255, 255, 255, 0.7);">
-                AI prediction features will be available here. Navigate to the Dashboard tab to view real-time data and charts.
+                Generate your first prediction in the Dashboard tab to see history here.
             </p>
-                                    </div>
-                            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
 # Theory Tab
 with tab3:
     st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
