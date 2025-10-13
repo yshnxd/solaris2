@@ -366,6 +366,19 @@ run_prediction = st.sidebar.button("🎯 Generate Prediction", help="Run AI pred
 evaluate_results = st.sidebar.button("📋 Evaluate History", help="Fill in actual prices for previous predictions")
 run_watchlist = st.sidebar.button("📊 Watchlist Analysis", help="Run predictions for all watchlist stocks")
 
+# Handle sidebar button actions
+if run_prediction:
+    st.session_state.sidebar_prediction_triggered = True
+    st.rerun()
+
+if evaluate_results:
+    st.session_state.sidebar_evaluate_triggered = True
+    st.rerun()
+
+if run_watchlist:
+    st.session_state.sidebar_watchlist_triggered = True
+    st.rerun()
+
 # Chart Configuration
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
@@ -649,6 +662,27 @@ def predict_with_models(features, current_price, scaler, cnn_model, lstm_model, 
 
 # Dashboard Tab
 with tab1:
+    # Handle sidebar button triggers
+    if st.session_state.get('sidebar_prediction_triggered', False):
+        st.session_state.sidebar_prediction_triggered = False
+        st.success("🎯 Generating prediction for selected stock...")
+        st.rerun()
+    
+    if st.session_state.get('sidebar_evaluate_triggered', False):
+        st.session_state.sidebar_evaluate_triggered = False
+        if os.path.exists(PREDICTION_HISTORY_CSV):
+            with st.spinner("📋 Evaluating prediction history..."):
+                updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
+                st.success("✅ Prediction history updated with actual prices!")
+        else:
+            st.warning("📋 No prediction history found to evaluate.")
+        st.rerun()
+    
+    if st.session_state.get('sidebar_watchlist_triggered', False):
+        st.session_state.sidebar_watchlist_triggered = False
+        st.info("📊 Watchlist analysis feature coming soon! For now, you can analyze individual stocks using the prediction feature.")
+        st.rerun()
+    
     st.markdown('<h2 class="section-header">🏠 Dashboard Overview</h2>', unsafe_allow_html=True)
     
     # Quick Stats Row
@@ -1055,6 +1089,25 @@ with tab1:
 
 # Prediction History Tab
 with tab2:
+    # Handle sidebar button triggers
+    if st.session_state.get('sidebar_evaluate_triggered', False):
+        st.session_state.sidebar_evaluate_triggered = False
+        if os.path.exists(PREDICTION_HISTORY_CSV):
+            with st.spinner("📋 Evaluating prediction history..."):
+                updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
+                st.success("✅ Prediction history updated with actual prices!")
+                st.rerun()
+        else:
+            st.warning("📋 No prediction history found to evaluate.")
+    
+    if st.session_state.get('sidebar_prediction_triggered', False):
+        st.session_state.sidebar_prediction_triggered = False
+        st.info("🎯 Navigate to the Dashboard tab to generate predictions!")
+    
+    if st.session_state.get('sidebar_watchlist_triggered', False):
+        st.session_state.sidebar_watchlist_triggered = False
+        st.info("📊 Watchlist analysis feature coming soon!")
+    
     st.markdown('<h2 class="section-header">📚 Prediction History</h2>', unsafe_allow_html=True)
     
     # Load and display prediction history
@@ -1219,6 +1272,19 @@ with tab2:
         """, unsafe_allow_html=True)
 # Theory Tab
 with tab3:
+    # Handle sidebar button triggers
+    if st.session_state.get('sidebar_prediction_triggered', False):
+        st.session_state.sidebar_prediction_triggered = False
+        st.info("🎯 Navigate to the Dashboard tab to generate predictions!")
+    
+    if st.session_state.get('sidebar_evaluate_triggered', False):
+        st.session_state.sidebar_evaluate_triggered = False
+        st.info("📋 Navigate to the Prediction History tab to evaluate predictions!")
+    
+    if st.session_state.get('sidebar_watchlist_triggered', False):
+        st.session_state.sidebar_watchlist_triggered = False
+        st.info("📊 Watchlist analysis feature coming soon!")
+    
     st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
 
     # --- Models Section ---
