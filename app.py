@@ -335,6 +335,10 @@ st.markdown("""
 <h2 class="sub-header">Hybrid Machine Learning Stock Price Prediction System</h2>
 """, unsafe_allow_html=True)
 
+# Initialize session state
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "Dashboard"
+
 # Main Navigation Tabs
 tab1, tab2, tab3 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📚 Theory"])
 
@@ -639,9 +643,9 @@ with tab1:
         st.markdown("""
         <div class="glass-card metric-card">
             <div style="text-align: center;">
-                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎯</div>
-                <div style="font-size: 1.5rem; color: #ff6b6b; font-weight: 900;">239%</div>
-                <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Backtest ROI</div>
+                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⚡</div>
+                <div style="font-size: 1.5rem; color: #00ff88; font-weight: 900;">Live</div>
+                <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Real-Time</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -653,18 +657,15 @@ with tab1:
     
     with action_col1:
         if st.button("🎯 Generate Prediction", key="dashboard_pred", help="Run AI prediction"):
-            st.session_state.active_tab = "Predictions"
-            st.rerun()
+            st.info("🎯 Navigate to the Predictions tab to generate AI predictions!")
     
     with action_col2:
         if st.button("📊 View Analytics", key="dashboard_analytics", help="Check prediction history"):
-            st.session_state.active_tab = "Analytics"
-            st.rerun()
+            st.info("📊 Analytics features are available in the Predictions tab!")
     
     with action_col3:
         if st.button("📈 Open Charts", key="dashboard_charts", help="View interactive charts"):
-            st.session_state.active_tab = "Charts"
-            st.rerun()
+            st.info("📈 Charts are displayed in the Dashboard tab!")
 
     # Recent Activity
     st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📋 Recent Activity</h3>', unsafe_allow_html=True)
@@ -716,6 +717,78 @@ with tab1:
             <div style="font-size: 3rem; margin-bottom: 1rem;">📊</div>
             <div style="color: rgba(255, 255, 255, 0.8);">
                 No predictions yet. Start by generating your first prediction!
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Real-Time Market Data and Charts (only in Dashboard)
+    st.markdown('<h2 class="section-header">📊 Real-Time Market Data</h2>', unsafe_allow_html=True)
+    
+    # Fetch real-time data
+    main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
+    
+    if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
+        st.markdown("""
+        <div class="glass-card" style="text-align: center; padding: 3rem;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">📈</div>
+            <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">No Chart Data Available</h3>
+            <p style="color: rgba(255, 255, 255, 0.7);">
+                Please select a valid stock ticker and ensure sufficient data is available.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        latest_data = main_ticker_data.iloc[-1]
+        current_price = latest_data['Close']
+        current_time = latest_data.name
+        
+        # Enhanced Metrics Display
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            current_price_formatted = f"${current_price:.2f}"
+            st.markdown(f"""
+            <div class="glass-card metric-card">
+                <div style="text-align: center;">
+                    <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
+                        {current_price_formatted}
+                    </div>
+                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
+                        💰 Current Price
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
+            change = current_price - prev_close
+            change_pct = (change / prev_close) * 100
+            change_color = "#00ff88" if change >= 0 else "#ff6b6b"
+            change_icon = "📈" if change >= 0 else "📉"
+            change_formatted = f"{change:+.2f}"
+            change_pct_formatted = f"{change_pct:+.2f}%"
+            
+            st.markdown(f"""
+            <div class="glass-card metric-card">
+                <div style="text-align: center;">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{change_icon}</div>
+                    <div style="font-size: 1.5rem; color: {change_color}; font-weight: 900;">{change_formatted}</div>
+                    <div style="font-size: 1.1rem; color: {change_color}; font-weight: 600;">{change_pct_formatted}</div>
+                    <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">24h Change</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            volume = latest_data['Volume']
+            volume_formatted = f"{volume:,.0f}"
+            st.markdown(f"""
+            <div class="glass-card metric-card">
+                <div style="text-align: center;">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📊</div>
+                    <div style="font-size: 1.5rem; color: #667eea; font-weight: 900;">{volume_formatted}</div>
+                    <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Volume</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -772,6 +845,7 @@ show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average C
 with tab2:
     st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
 
+    # Fetch data for predictions
 main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
 if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
@@ -786,245 +860,15 @@ if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) <
         </div>
         """, unsafe_allow_html=True)
 else:
-    latest_data = main_ticker_data.iloc[-1]
-    current_price = latest_data['Close']
-    current_time = latest_data.name
-    
-    # Enhanced Metrics Display
-    st.markdown('<h2 class="section-header">📊 Real-Time Market Data</h2>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        current_price_formatted = f"${current_price:.2f}"
-        st.markdown(f"""
-        <div class="glass-card metric-card">
-            <div style="text-align: center;">
-                <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
-                    {current_price_formatted}
-                </div>
-                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
-                    💰 Current Price
-                </div>
-            </div>
+        st.markdown("""
+        <div class="glass-card" style="text-align: center; padding: 3rem;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">🎯</div>
+            <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">AI Predictions</h3>
+            <p style="color: rgba(255, 255, 255, 0.7);">
+                AI prediction features will be available here. Navigate to the Dashboard tab to view real-time data and charts.
+            </p>
         </div>
         """, unsafe_allow_html=True)
-    
-    with col2:
-        prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
-        change = current_price - prev_close
-        change_pct = (change / prev_close) * 100
-        change_color = "#00ff88" if change >= 0 else "#ff6b6b"
-        change_icon = "📈" if change >= 0 else "📉"
-        change_formatted = f"{change:+.2f}"
-        change_pct_formatted = f"{change_pct:+.2f}%"
-        
-        st.markdown(f"""
-        <div class="glass-card metric-card">
-            <div style="text-align: center;">
-                <div style="font-size: 2rem; font-weight: 900; color: {change_color}; margin-bottom: 0.5rem; text-shadow: 0 0 3px {change_color}30;">
-                    {change_icon} {change_formatted}
-                </div>
-                <div style="font-size: 1.3rem; color: {change_color}; font-weight: 700; margin-bottom: 0.5rem;">
-                    {change_pct_formatted}
-                </div>
-                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
-                    ⚡ Price Change
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class="glass-card metric-card">
-            <div style="text-align: center;">
-                <div style="font-size: 1.8rem; font-weight: 900; color: #667eea; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(102, 126, 234, 0.3);">
-                    🕐 {current_time.strftime("%H:%M")}
-                </div>
-                <div style="font-size: 1rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">
-                    {current_time.strftime("%Y-%m-%d")}
-                </div>
-                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
-                    📅 Last Updated
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    # Compute indicators for plotting
-    close_series = main_ticker_data['Close']
-    sma_5 = close_series.rolling(5).mean() if len(close_series) >= 5 else None
-    sma_10 = close_series.rolling(10).mean() if len(close_series) >= 10 else None
-    sma_20 = close_series.rolling(20).mean() if len(close_series) >= 20 else None
-    ema_5 = close_series.ewm(span=5, adjust=False).mean() if len(close_series) >= 5 else None
-    ema_10 = close_series.ewm(span=10, adjust=False).mean() if len(close_series) >= 10 else None
-    ema_20 = close_series.ewm(span=20, adjust=False).mean() if len(close_series) >= 20 else None
-    try:
-        rsi_14 = ta.momentum.RSIIndicator(close_series, window=14).rsi() if show_rsi else None
-    except Exception:
-        rsi_14 = None
-    try:
-        macd_obj = ta.trend.MACD(close_series) if show_macd else None
-        macd_line = macd_obj.macd() if macd_obj is not None else None
-        macd_signal = macd_obj.macd_signal() if macd_obj is not None else None
-        macd_hist = macd_obj.macd_diff() if macd_obj is not None else None
-    except Exception:
-        macd_line = macd_signal = macd_hist = None
-
-    # Dynamic subplot layout: Price, optional RSI, optional MACD, Volume
-    extra_rows = (1 if show_rsi else 0) + (1 if show_macd else 0)
-    total_rows = 2 + extra_rows
-    subplot_titles = [f'{selected_ticker} Price']
-    if show_rsi:
-        subplot_titles.append('RSI (14)')
-    if show_macd:
-        subplot_titles.append('MACD')
-    subplot_titles.append('Volume')
-    # Row widths: put more height on price; smaller on indicators and volume
-    row_width = []
-    # Build from bottom to top as Plotly expects
-    # Start with Volume
-    row_width.append(0.2)
-    # Add MACD if used
-    if show_macd:
-        row_width.append(0.25)
-    # Add RSI if used
-    if show_rsi:
-        row_width.append(0.25)
-    # Finally price
-    row_width.append(0.8)
-    fig = make_subplots(rows=total_rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.09,
-                        subplot_titles=tuple(subplot_titles),
-                        row_width=row_width)
-    # Row indices
-    price_row = 1
-    vol_row = total_rows
-    rsi_row = 2 if show_rsi else None
-    macd_row = (3 if show_rsi else 2) if show_macd else None
-
-    # Price + overlays
-    fig.add_trace(go.Candlestick(
-        x=main_ticker_data.index,
-                                 open=main_ticker_data['Open'],
-                                 high=main_ticker_data['High'],
-                                 low=main_ticker_data['Low'],
-                                 close=main_ticker_data['Close'],
-        name="Price"
-    ), row=price_row, col=1)
-    overlay_map = {
-        "SMA 5": (sma_5, "SMA 5", "#7f7f7f", "dash", "SMA"),
-        "SMA 10": (sma_10, "SMA 10", "#b0b0b0", "dash", "SMA"),
-        "SMA 20": (sma_20, "SMA 20", "#c7c7c7", "dash", "SMA"),
-        "EMA 5": (ema_5, "EMA 5", "#ffbb78", "dot", "EMA"),
-        "EMA 10": (ema_10, "EMA 10", "#aec7e8", "dot", "EMA"),
-        "EMA 20": (ema_20, "EMA 20", "#c5b0d5", "dot", "EMA"),
-    }
-    for key in overlay_options:
-        series, label, color, dash, group = overlay_map.get(key, (None, None, None, None, None))
-        if series is not None:
-            fig.add_trace(go.Scatter(
-                x=series.index,
-                y=series,
-                name=label,
-                mode='lines',
-                line=dict(color=color, width=1.2, dash=dash),
-                legendgroup=group,
-                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>"+label+": %{y:.2f}<extra></extra>"
-            ), row=price_row, col=1)
-
-    # RSI subplot
-    if show_rsi and rsi_row is not None and rsi_14 is not None:
-        # Shaded zones: green band 30-70, light red outside (0-30 and 70-100)
-        fig.add_hrect(y0=30, y1=70, fillcolor="rgba(46, 204, 113, 0.08)", line_width=0, row=rsi_row, col=1)
-        fig.add_hrect(y0=70, y1=100, fillcolor="rgba(231, 76, 60, 0.06)", line_width=0, row=rsi_row, col=1)
-        fig.add_hrect(y0=0, y1=30, fillcolor="rgba(231, 76, 60, 0.06)", line_width=0, row=rsi_row, col=1)
-        fig.add_trace(go.Scatter(
-            x=rsi_14.index, y=rsi_14, name='RSI (14)', mode='lines',
-            line=dict(color='#1f77b4', width=1.4),
-            hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>RSI: %{y:.2f}<extra></extra>"
-        ), row=rsi_row, col=1)
-        # 30/70 guide lines
-        fig.add_hline(y=70, line_dash="dot", line_color="#e74c3c", row=rsi_row, col=1)
-        fig.add_hline(y=30, line_dash="dot", line_color="#2ecc71", row=rsi_row, col=1)
-
-    # MACD subplot
-    if show_macd and macd_row is not None and macd_line is not None:
-        if macd_hist is not None:
-            fig.add_trace(go.Bar(
-                x=macd_hist.index,
-                y=macd_hist,
-                name='MACD Hist',
-                marker_color=['#2ecc71' if v >= 0 else '#e74c3c' for v in macd_hist.fillna(0)],
-                opacity=0.5,
-                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Hist: %{y:.4f}<extra></extra>"
-            ), row=macd_row, col=1)
-        fig.add_trace(go.Scatter(
-            x=macd_line.index, y=macd_line, name='MACD', mode='lines',
-            line=dict(color='#1f77b4', width=1.4),
-            hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>MACD: %{y:.4f}<extra></extra>"
-        ), row=macd_row, col=1)
-        if macd_signal is not None:
-            fig.add_trace(go.Scatter(
-                x=macd_signal.index, y=macd_signal, name='Signal', mode='lines',
-                line=dict(color='#ff7f0e', width=1.2, dash='dot'),
-                hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Signal: %{y:.4f}<extra></extra>"
-            ), row=macd_row, col=1)
-
-    # Volume subplot (always)
-    colors = ['rgba(231,76,60,0.45)' if row['Open'] > row['Close'] else 'rgba(46,204,113,0.45)'
-              for _, row in main_ticker_data.iterrows()]
-    fig.add_trace(go.Bar(x=main_ticker_data.index,
-                         y=main_ticker_data['Volume'],
-                         marker_color=colors,
-                         name="Volume",
-                         hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Vol: %{y:.0f}<extra>Volume</extra>"), row=vol_row, col=1)
-    fig.add_vline(x=current_time, line_dash="dash", line_color="rgba(255,255,255,0.5)", row=price_row, col=1)
-    # Enhanced Chart Theme
-    fig.update_layout(
-        height=760 if extra_rows else 620,
-        showlegend=True,
-        legend=dict(
-            orientation='h', 
-            yanchor='bottom', 
-            y=1.02, 
-            xanchor='left', 
-            x=0, 
-            groupclick='toggleitem',
-            bgcolor='rgba(255, 255, 255, 0.1)',
-            bordercolor='rgba(255, 255, 255, 0.2)',
-            borderwidth=1,
-            font=dict(color='rgba(255, 255, 255, 0.9)')
-        ),
-        hovermode='x unified',
-        xaxis_rangeslider_visible=False,
-        margin=dict(l=40, r=20, t=40, b=40),
-        plot_bgcolor='rgba(255, 255, 255, 0.05)',
-        paper_bgcolor='rgba(255, 255, 255, 0.05)',
-        font=dict(color='rgba(255, 255, 255, 0.9)', family='Inter'),
-        title=dict(
-            text=f"{selected_ticker} Price Chart",
-            font=dict(size=24, color='rgba(255, 255, 255, 0.9)'),
-            x=0.5
-        )
-    )
-    
-    # Enhanced axis styling
-    fig.update_xaxes(
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        color='rgba(255, 255, 255, 0.8)',
-        showgrid=True
-    )
-    fig.update_yaxes(
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        color='rgba(255, 255, 255, 0.8)',
-        showgrid=True
-    )
-    # Fix RSI range for clarity
-    if show_rsi and rsi_row is not None:
-        fig.update_yaxes(range=[0, 100], row=rsi_row, col=1)
-    st.plotly_chart(fig, use_container_width=True)
-
 # Theory Tab
 with tab3:
     st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
