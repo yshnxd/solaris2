@@ -940,7 +940,7 @@ else:
         st.plotly_chart(fig, use_container_width=True)
         
         # AI Predictions Section
-    st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
+        st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
     
         # Handle sidebar prediction button
         prediction_triggered = False
@@ -965,7 +965,7 @@ else:
                         
                         if predicted_price is not None:
                             # Display prediction results
-        st.markdown("""
+                            st.markdown("""
                             <div class="glass-card" style="margin: 2rem 0;">
                                 <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem;">🎯 AI Prediction Results</h3>
                             """, unsafe_allow_html=True)
@@ -1395,16 +1395,16 @@ with tab2:
                     </div>
                     """, unsafe_allow_html=True)
                 
-    else:
-        st.markdown("""
-        <div class="glass-card" style="text-align: center; padding: 3rem;">
+            else:
+                st.markdown("""
+                <div class="glass-card" style="text-align: center; padding: 3rem;">
                     <div style="font-size: 4rem; margin-bottom: 1rem;">📊</div>
                     <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">No Prediction History</h3>
-            <p style="color: rgba(255, 255, 255, 0.7);">
+                    <p style="color: rgba(255, 255, 255, 0.7);">
                         Generate your first prediction in the Dashboard tab to see history here.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
                 
         except Exception as e:
             st.error(f"Error loading prediction history: {str(e)}")
@@ -1416,8 +1416,8 @@ with tab2:
             <p style="color: rgba(255, 255, 255, 0.7);">
                 Generate your first prediction in the Dashboard tab to see history here.
             </p>
-                                    </div>
-                            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
 # Theory Tab
 with tab3:
     st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
