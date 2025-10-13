@@ -339,6 +339,54 @@ st.markdown("""
 if 'active_tab' not in st.session_state:
     st.session_state.active_tab = "Dashboard"
 
+# Enhanced Sidebar
+st.sidebar.markdown("""
+<div style="text-align: center; padding: 1rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.2); margin-bottom: 1rem;">
+    <h3 style="color: rgba(255, 255, 255, 0.9); margin: 0; font-weight: 600;">⚙️ Control Panel</h3>
+</div>
+""", unsafe_allow_html=True)
+
+# Stock Selection with Enhanced Styling
+st.sidebar.markdown("### 📈 Stock Selection")
+selected_ticker = st.sidebar.text_input("Stock Ticker Symbol", "AAPL", help="Enter a valid stock ticker symbol (e.g., AAPL, MSFT, TSLA)").upper()
+
+# History Slider with Enhanced Styling
+st.sidebar.markdown("### 📊 Data Range")
+days_history = st.sidebar.slider(
+    "Historical Data Period", 
+    min_value=30, 
+    max_value=729, 
+    value=90,
+    help="Number of days of historical data to analyze"
+)
+
+# Action Buttons with Enhanced Styling
+st.sidebar.markdown("### 🚀 Actions")
+run_prediction = st.sidebar.button("🎯 Generate Prediction", help="Run AI prediction for selected stock")
+evaluate_results = st.sidebar.button("📋 Evaluate History", help="Fill in actual prices for previous predictions")
+run_watchlist = st.sidebar.button("📊 Watchlist Analysis", help="Run predictions for all watchlist stocks")
+
+# Chart Configuration
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+<div style="text-align: center; padding: 1rem 0;">
+    <h4 style="color: rgba(255, 255, 255, 0.9); margin: 0; font-weight: 600;">📈 Chart Configuration</h4>
+</div>
+""", unsafe_allow_html=True)
+
+# Enhanced Indicator Controls
+st.sidebar.markdown("#### Price Overlays")
+overlay_options = st.sidebar.multiselect(
+    "Select Moving Averages",
+    ["SMA 5", "SMA 10", "SMA 20", "EMA 5", "EMA 10", "EMA 20"],
+    default=["SMA 20"],
+    help="Choose which moving averages to display on the chart"
+)
+
+st.sidebar.markdown("#### Technical Indicators")
+show_rsi = st.sidebar.checkbox("📊 RSI (14)", value=False, help="Relative Strength Index")
+show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average Convergence Divergence")
+
 # Main Navigation Tabs
 tab1, tab2, tab3 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📚 Theory"])
 
@@ -725,9 +773,9 @@ with tab1:
     st.markdown('<h2 class="section-header">📊 Real-Time Market Data</h2>', unsafe_allow_html=True)
     
     # Fetch real-time data
-    main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
-    
-    if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
+main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
+
+if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
         st.markdown("""
         <div class="glass-card" style="text-align: center; padding: 3rem;">
             <div style="font-size: 4rem; margin-bottom: 1rem;">📈</div>
@@ -737,49 +785,49 @@ with tab1:
             </p>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        latest_data = main_ticker_data.iloc[-1]
-        current_price = latest_data['Close']
-        current_time = latest_data.name
-        
-        # Enhanced Metrics Display
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            current_price_formatted = f"${current_price:.2f}"
-            st.markdown(f"""
-            <div class="glass-card metric-card">
-                <div style="text-align: center;">
-                    <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
-                        {current_price_formatted}
-                    </div>
-                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
-                        💰 Current Price
-                    </div>
+else:
+    latest_data = main_ticker_data.iloc[-1]
+    current_price = latest_data['Close']
+    current_time = latest_data.name
+    
+    # Enhanced Metrics Display
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        current_price_formatted = f"${current_price:.2f}"
+        st.markdown(f"""
+        <div class="glass-card metric-card">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; font-weight: 900; color: #00ff88; margin-bottom: 0.5rem; text-shadow: 0 0 3px rgba(0, 255, 136, 0.3);">
+                    {current_price_formatted}
+                </div>
+                <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); font-weight: 600;">
+                    💰 Current Price
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
+        change = current_price - prev_close
+        change_pct = (change / prev_close) * 100
+        change_color = "#00ff88" if change >= 0 else "#ff6b6b"
+        change_icon = "📈" if change >= 0 else "📉"
+        change_formatted = f"{change:+.2f}"
+        change_pct_formatted = f"{change_pct:+.2f}%"
         
-        with col2:
-            prev_close = main_ticker_data.iloc[-2]['Close'] if len(main_ticker_data) > 1 else current_price
-            change = current_price - prev_close
-            change_pct = (change / prev_close) * 100
-            change_color = "#00ff88" if change >= 0 else "#ff6b6b"
-            change_icon = "📈" if change >= 0 else "📉"
-            change_formatted = f"{change:+.2f}"
-            change_pct_formatted = f"{change_pct:+.2f}%"
-            
-            st.markdown(f"""
-            <div class="glass-card metric-card">
-                <div style="text-align: center;">
-                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{change_icon}</div>
-                    <div style="font-size: 1.5rem; color: {change_color}; font-weight: 900;">{change_formatted}</div>
-                    <div style="font-size: 1.1rem; color: {change_color}; font-weight: 600;">{change_pct_formatted}</div>
-                    <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">24h Change</div>
-                </div>
+        st.markdown(f"""
+        <div class="glass-card metric-card">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{change_icon}</div>
+                <div style="font-size: 1.5rem; color: {change_color}; font-weight: 900;">{change_formatted}</div>
+                <div style="font-size: 1.1rem; color: {change_color}; font-weight: 600;">{change_pct_formatted}</div>
+                <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">24h Change</div>
             </div>
-            """, unsafe_allow_html=True)
-        
+        </div>
+        """, unsafe_allow_html=True)
+    
         with col3:
             volume = latest_data['Volume']
             volume_formatted = f"{volume:,.0f}"
@@ -789,66 +837,18 @@ with tab1:
                     <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📊</div>
                     <div style="font-size: 1.5rem; color: #667eea; font-weight: 900;">{volume_formatted}</div>
                     <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Volume</div>
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-# Enhanced Sidebar
-st.sidebar.markdown("""
-<div style="text-align: center; padding: 1rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.2); margin-bottom: 1rem;">
-    <h3 style="color: rgba(255, 255, 255, 0.9); margin: 0; font-weight: 600;">⚙️ Control Panel</h3>
-</div>
-""", unsafe_allow_html=True)
-
-# Stock Selection with Enhanced Styling
-st.sidebar.markdown("### 📈 Stock Selection")
-selected_ticker = st.sidebar.text_input("Stock Ticker Symbol", "AAPL", help="Enter a valid stock ticker symbol (e.g., AAPL, MSFT, TSLA)").upper()
-
-# History Slider with Enhanced Styling
-st.sidebar.markdown("### 📊 Data Range")
-days_history = st.sidebar.slider(
-    "Historical Data Period", 
-    min_value=30, 
-    max_value=729, 
-    value=90,
-    help="Number of days of historical data to analyze"
-)
-
-# Action Buttons with Enhanced Styling
-st.sidebar.markdown("### 🚀 Actions")
-run_prediction = st.sidebar.button("🎯 Generate Prediction", help="Run AI prediction for selected stock")
-evaluate_results = st.sidebar.button("📋 Evaluate History", help="Fill in actual prices for previous predictions")
-run_watchlist = st.sidebar.button("📊 Watchlist Analysis", help="Run predictions for all watchlist stocks")
-
-# Chart Configuration
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-<div style="text-align: center; padding: 1rem 0;">
-    <h4 style="color: rgba(255, 255, 255, 0.9); margin: 0; font-weight: 600;">📈 Chart Configuration</h4>
-</div>
-""", unsafe_allow_html=True)
-
-# Enhanced Indicator Controls
-st.sidebar.markdown("#### Price Overlays")
-overlay_options = st.sidebar.multiselect(
-    "Select Moving Averages",
-    ["SMA 5", "SMA 10", "SMA 20", "EMA 5", "EMA 10", "EMA 20"],
-    default=["SMA 20"],
-    help="Choose which moving averages to display on the chart"
-)
-
-st.sidebar.markdown("#### Technical Indicators")
-show_rsi = st.sidebar.checkbox("📊 RSI (14)", value=False, help="Relative Strength Index")
-show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average Convergence Divergence")
+            """, unsafe_allow_html=True)
 
 # Predictions Tab
 with tab2:
     st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
-
+    
     # Fetch data for predictions
-main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
+    main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
 
-if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
+    if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) < 128:
         st.markdown("""
         <div style="background: rgba(255, 107, 107, 0.1); border: 2px solid rgba(255, 107, 107, 0.3); border-radius: 15px; padding: 2rem; text-align: center; backdrop-filter: blur(10px);">
             <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
@@ -859,7 +859,7 @@ if main_ticker_data is None or main_ticker_data.empty or len(main_ticker_data) <
             </p>
         </div>
         """, unsafe_allow_html=True)
-else:
+    else:
         st.markdown("""
         <div class="glass-card" style="text-align: center; padding: 3rem;">
             <div style="font-size: 4rem; margin-bottom: 1rem;">🎯</div>
@@ -867,8 +867,8 @@ else:
             <p style="color: rgba(255, 255, 255, 0.7);">
                 AI prediction features will be available here. Navigate to the Dashboard tab to view real-time data and charts.
             </p>
-        </div>
-        """, unsafe_allow_html=True)
+                                    </div>
+                            """, unsafe_allow_html=True)
 # Theory Tab
 with tab3:
     st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
