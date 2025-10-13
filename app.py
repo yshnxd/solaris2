@@ -323,6 +323,39 @@ st.markdown("""
             padding: 1rem;
         }
     }
+    
+    /* Ensure proper sizing for charts and predictions */
+    .stPlotlyChart {
+        width: 100% !important;
+        height: 600px !important;
+    }
+    
+    .stMetric {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 15px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+    
+    /* Fix column spacing */
+    .stColumns {
+        gap: 1rem;
+    }
+    
+    /* Ensure prediction cards are properly sized */
+    .prediction-card {
+        min-height: 200px;
+        width: 100%;
+    }
+    
+    /* Fix glass card sizing */
+    .glass-card {
+        min-height: auto;
+        width: 100%;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -876,7 +909,8 @@ else:
             xaxis_title="Time",
             yaxis_title="Price ($)",
             template="plotly_dark",
-            height=600,
+            height=700,
+            width=None,
             showlegend=True,
             legend=dict(
                 orientation="h",
@@ -887,22 +921,27 @@ else:
             ),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white'),
+            font=dict(color='white', size=12),
             xaxis=dict(
                 gridcolor='rgba(255,255,255,0.1)',
-                showgrid=True
+                showgrid=True,
+                title_font=dict(size=14),
+                tickfont=dict(size=12)
             ),
             yaxis=dict(
                 gridcolor='rgba(255,255,255,0.1)',
-                showgrid=True
-            )
+                showgrid=True,
+                title_font=dict(size=14),
+                tickfont=dict(size=12)
+            ),
+            margin=dict(l=50, r=50, t=80, b=50)
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
         # AI Predictions Section
-        st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
-        
+    st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
+    
         # Handle sidebar prediction button
         prediction_triggered = False
         if run_prediction:
@@ -926,67 +965,79 @@ else:
                         
                         if predicted_price is not None:
                             # Display prediction results
-                            st.markdown("""
+        st.markdown("""
                             <div class="glass-card" style="margin: 2rem 0;">
                                 <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem;">🎯 AI Prediction Results</h3>
                             """, unsafe_allow_html=True)
                             
                             # Prediction metrics - emphasize predicted price
-                            col1, col2, col3, col4 = st.columns(4)
+                            col1, col2, col3, col4 = st.columns(4, gap="large")
                             
                             with col1:
-                                st.metric("Current Price", f"${current_price:.2f}")
+                                st.markdown(f"""
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center;">
+                                    <div style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">CURRENT PRICE</div>
+                                    <div style="font-size: 2rem; color: #00ff88; font-weight: 900;">${current_price:.2f}</div>
+                                </div>
+                                """, unsafe_allow_html=True)
                             
                             with col2:
                                 # Make predicted price more prominent
                                 st.markdown(f"""
-                                <div style="text-align: center; padding: 1rem; background: rgba(102, 126, 234, 0.2); border-radius: 15px; border: 2px solid #667eea;">
-                                    <div style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">PREDICTED PRICE</div>
-                                    <div style="font-size: 2rem; color: #667eea; font-weight: 900;">${predicted_price:.2f}</div>
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center; background: rgba(102, 126, 234, 0.3); border: 2px solid #667eea;">
+                                    <div style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.9); margin-bottom: 0.5rem; font-weight: 600;">PREDICTED PRICE</div>
+                                    <div style="font-size: 2.5rem; color: #667eea; font-weight: 900; text-shadow: 0 0 10px rgba(102, 126, 234, 0.5);">${predicted_price:.2f}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
                             with col3:
-                                st.metric("Expected Change", f"{pred_change_pct:+.2f}%")
+                                st.markdown(f"""
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center;">
+                                    <div style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">EXPECTED CHANGE</div>
+                                    <div style="font-size: 2rem; color: {'#00ff88' if pred_change_pct >= 0 else '#ff6b6b'}; font-weight: 900;">{pred_change_pct:+.2f}%</div>
+                                </div>
+                                """, unsafe_allow_html=True)
                             
                             with col4:
-                                st.metric("Confidence", f"{confidence:.1f}%")
+                                st.markdown(f"""
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center;">
+                                    <div style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">CONFIDENCE</div>
+                                    <div style="font-size: 2rem; color: {'#00ff88' if confidence > 70 else '#ff6b6b' if confidence < 50 else '#667eea'}; font-weight: 900;">{confidence:.1f}%</div>
+                                </div>
+                                """, unsafe_allow_html=True)
                             
                             # Model votes
-                            st.markdown('<h4 style="color: rgba(255, 255, 255, 0.9); margin: 1rem 0;">🤖 Model Consensus</h4>', unsafe_allow_html=True)
+                            st.markdown('<h4 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">🤖 Model Consensus</h4>', unsafe_allow_html=True)
                             
-                            vote_col1, vote_col2, vote_col3 = st.columns(3)
+                            vote_col1, vote_col2, vote_col3 = st.columns(3, gap="large")
                             
                             with vote_col1:
                                 vote_color = "#00ff88" if votes["CNN"] == "UP" else "#ff6b6b"
                                 st.markdown(f"""
-                                <div class="glass-card metric-card">
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🧩</div>
-                                        <div style="font-size: 1.2rem; color: {vote_color}; font-weight: 700;">CNN: {votes["CNN"]}</div>
-                                    </div>
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center;">
+                                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🧩</div>
+                                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">CNN Model</div>
+                                    <div style="font-size: 1.5rem; color: {vote_color}; font-weight: 700;">{votes["CNN"]}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
                             with vote_col2:
                                 vote_color = "#00ff88" if votes["LSTM"] == "UP" else "#ff6b6b"
                                 st.markdown(f"""
-                                <div class="glass-card metric-card">
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🔄</div>
-                                        <div style="font-size: 1.2rem; color: {vote_color}; font-weight: 700;">LSTM: {votes["LSTM"]}</div>
-                                    </div>
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center;">
+                                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔄</div>
+                                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">LSTM Model</div>
+                                    <div style="font-size: 1.5rem; color: {vote_color}; font-weight: 700;">{votes["LSTM"]}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
                             with vote_col3:
                                 vote_color = "#00ff88" if votes["XGBoost"] == "UP" else "#ff6b6b"
                                 st.markdown(f"""
-                                <div class="glass-card metric-card">
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🌳</div>
-                                        <div style="font-size: 1.2rem; color: {vote_color}; font-weight: 700;">XGBoost: {votes["XGBoost"]}</div>
-                                    </div>
+                                <div class="glass-card metric-card" style="padding: 1.5rem; text-align: center;">
+                                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🌳</div>
+                                    <div style="font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); margin-bottom: 0.5rem;">XGBoost Model</div>
+                                    <div style="font-size: 1.5rem; color: {vote_color}; font-weight: 700;">{votes["XGBoost"]}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
@@ -1033,7 +1084,125 @@ else:
         
         # Handle sidebar watchlist button
         if run_watchlist:
-            st.info("📊 Watchlist analysis feature coming soon! For now, you can analyze individual stocks using the prediction feature.")
+            st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📊 Watchlist Analysis</h3>', unsafe_allow_html=True)
+            
+            # Default watchlist stocks
+            watchlist_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "NFLX"]
+            
+            st.markdown("""
+            <div class="glass-card" style="margin: 1rem 0; padding: 2rem;">
+                <h4 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">📈 Running Predictions for Watchlist Stocks</h4>
+                <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 1rem;">
+                    Analyzing {len(watchlist_stocks)} popular stocks with AI models...
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+            
+            # Create progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            watchlist_results = []
+            
+            for i, stock in enumerate(watchlist_stocks):
+                status_text.text(f"Analyzing {stock}...")
+                
+                try:
+                    # Fetch data for this stock
+                    stock_data = fetch_stock_data(stock, period=f"{days_history}d", interval="60m")
+                    
+                    if stock_data is not None and len(stock_data) >= SEQ_LEN:
+                        latest_data = stock_data.iloc[-1]
+                        current_price = latest_data['Close']
+                        
+                        # Fetch cross-asset data
+                        cross_data = fetch_cross_assets(stock_data.index, days_history, stock)
+                        
+                        # Create features
+                        features = create_features_for_app(stock, stock_data, cross_data)
+                        
+                        if features is not None and len(features) >= SEQ_LEN:
+                            # Make prediction
+                            predicted_price, pred_change_pct, votes, confidence = predict_with_models(
+                                features, current_price, scaler, cnn_model, lstm_model, xgb_model, meta_model
+                            )
+                            
+                            if predicted_price is not None:
+                                watchlist_results.append({
+                                    'ticker': stock,
+                                    'current_price': current_price,
+                                    'predicted_price': predicted_price,
+                                    'change_pct': pred_change_pct,
+                                    'confidence': confidence,
+                                    'votes': votes
+                                })
+                
+                except Exception as e:
+                    st.warning(f"⚠️ Could not analyze {stock}: {str(e)}")
+                
+                # Update progress
+                progress_bar.progress((i + 1) / len(watchlist_stocks))
+                time.sleep(0.5)  # Small delay for better UX
+            
+            status_text.text("✅ Watchlist analysis complete!")
+            
+            # Display results
+            if watchlist_results:
+                st.markdown('<h4 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📊 Watchlist Results</h4>', unsafe_allow_html=True)
+                
+                # Sort by confidence
+                watchlist_results.sort(key=lambda x: x['confidence'], reverse=True)
+                
+                for result in watchlist_results:
+                    change_color = "#00ff88" if result['change_pct'] >= 0 else "#ff6b6b"
+                    confidence_color = "#00ff88" if result['confidence'] > 70 else "#ff6b6b" if result['confidence'] < 50 else "#667eea"
+                    
+                    st.markdown(f"""
+                    <div class="glass-card" style="margin: 1rem 0; padding: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.3rem; color: rgba(255, 255, 255, 0.9); font-weight: 700;">{result['ticker']}</div>
+                            <div style="font-size: 1rem; color: {confidence_color}; font-weight: 700; padding: 0.5rem 1rem; background: rgba(255, 255, 255, 0.1); border-radius: 20px;">{result['confidence']:.1f}% Confidence</div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem;">
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Current Price</div>
+                                <div style="color: #00ff88; font-weight: 600; font-size: 1.1rem;">${result['current_price']:.2f}</div>
+                            </div>
+                            <div style="background: rgba(102, 126, 234, 0.2); padding: 0.5rem; border-radius: 8px; border: 1px solid #667eea;">
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">PREDICTED PRICE</div>
+                                <div style="color: #667eea; font-weight: 700; font-size: 1.1rem;">${result['predicted_price']:.2f}</div>
+                            </div>
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Expected Change</div>
+                                <div style="color: {change_color}; font-weight: 600; font-size: 1.1rem;">{result['change_pct']:+.2f}%</div>
+                            </div>
+                            <div>
+                                <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Model Consensus</div>
+                                <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600; font-size: 0.9rem;">
+                                    {result['votes']['CNN']}/{result['votes']['LSTM']}/{result['votes']['XGBoost']}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Summary statistics
+                avg_confidence = sum(r['confidence'] for r in watchlist_results) / len(watchlist_results)
+                bullish_count = sum(1 for r in watchlist_results if r['change_pct'] > 0)
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Average Confidence", f"{avg_confidence:.1f}%")
+                
+                with col2:
+                    st.metric("Bullish Predictions", f"{bullish_count}/{len(watchlist_results)}")
+                
+                with col3:
+                    st.metric("Stocks Analyzed", len(watchlist_results))
+                
+            else:
+                st.warning("⚠️ No predictions could be generated for the watchlist stocks.")
         
         # Technical Indicators Section
         if show_rsi or show_macd:
@@ -1226,12 +1395,12 @@ with tab2:
                     </div>
                     """, unsafe_allow_html=True)
                 
-            else:
-                st.markdown("""
-                <div class="glass-card" style="text-align: center; padding: 3rem;">
+    else:
+        st.markdown("""
+        <div class="glass-card" style="text-align: center; padding: 3rem;">
                     <div style="font-size: 4rem; margin-bottom: 1rem;">📊</div>
                     <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem;">No Prediction History</h3>
-                    <p style="color: rgba(255, 255, 255, 0.7);">
+            <p style="color: rgba(255, 255, 255, 0.7);">
                         Generate your first prediction in the Dashboard tab to see history here.
             </p>
         </div>
