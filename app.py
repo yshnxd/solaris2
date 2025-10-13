@@ -483,7 +483,7 @@ show_macd = st.sidebar.checkbox("📈 MACD", value=False, help="Moving Average C
 # Main Navigation Tabs
 tab1, tab2, tab3 = st.tabs(["🏠 Dashboard", "📚 Prediction History", "📚 Theory"])
 
-PREDICTION_HISTORY_CSV = "prediction_history.csv"
+PREDICTION_HISTORY_CSV = "solaris-data.csv"
 show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
 
 def ensure_csv_has_header(csv_path, columns):
@@ -1332,19 +1332,18 @@ with tab2:
                     """, unsafe_allow_html=True)
                 
                 with col2:
-                    # Calculate average prediction accuracy
+                    # Calculate average percentage error
                     completed_predictions = history_df[history_df['actual_price'].notna()]
                     if len(completed_predictions) > 0:
-                        avg_error = abs(completed_predictions['error_pct']).mean()
-                        accuracy = max(0, 100 - avg_error)
+                        avg_error_pct = abs(completed_predictions['error_pct']).mean()
                     else:
-                        accuracy = 0
+                        avg_error_pct = 0
                     st.markdown(f"""
                     <div class="glass-card metric-card">
                         <div style="text-align: center;">
-                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🎯</div>
-                            <div style="font-size: 1.5rem; color: #00ff88; font-weight: 900;">{accuracy:.1f}%</div>
-                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Avg Accuracy</div>
+                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📊</div>
+                            <div style="font-size: 1.5rem; color: #ff6b6b; font-weight: 900;">{avg_error_pct:.2f}%</div>
+                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Avg Error %</div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -1363,6 +1362,26 @@ with tab2:
                     """, unsafe_allow_html=True)
                 
                 with col4:
+                    # Calculate average absolute error in dollars
+                    completed_predictions = history_df[history_df['actual_price'].notna()]
+                    if len(completed_predictions) > 0:
+                        avg_abs_error = completed_predictions['error_abs'].mean()
+                    else:
+                        avg_abs_error = 0
+                    st.markdown(f"""
+                    <div class="glass-card metric-card">
+                        <div style="text-align: center;">
+                            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">💰</div>
+                            <div style="font-size: 1.5rem; color: #f093fb; font-weight: 900;">${avg_abs_error:.2f}</div>
+                            <div style="color: rgba(255, 255, 255, 0.8); font-weight: 600;">Avg Error $</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Add average confidence metric
+                col1, col2, col3, col4, col5 = st.columns(5)
+                
+                with col5:
                     avg_confidence = history_df['confidence'].mean() if 'confidence' in history_df.columns else 0
                     st.markdown(f"""
                     <div class="glass-card metric-card">
