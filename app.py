@@ -327,7 +327,22 @@ st.markdown("""
     /* Ensure proper sizing for charts and predictions */
     .stPlotlyChart {
         width: 100% !important;
-        height: 600px !important;
+        height: 800px !important;
+        min-height: 800px !important;
+        max-height: none !important;
+    }
+    
+    .stPlotlyChart > div {
+        width: 100% !important;
+        height: 800px !important;
+        min-height: 800px !important;
+    }
+    
+    /* Fix plotly container sizing */
+    .js-plotly-plot {
+        width: 100% !important;
+        height: 800px !important;
+        min-height: 800px !important;
     }
     
     .stMetric {
@@ -355,6 +370,32 @@ st.markdown("""
         min-height: auto;
         width: 100%;
         margin: 1rem 0;
+    }
+    
+    /* Ensure proper separation between chart and predictions */
+    .chart-container {
+        margin-bottom: 3rem;
+        padding-bottom: 2rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .prediction-container {
+        margin-top: 2rem;
+        padding-top: 2rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    /* Prevent chart from being compressed by other elements */
+    .stPlotlyChart {
+        position: relative;
+        z-index: 1;
+    }
+    
+    /* Ensure prediction cards don't interfere with chart */
+    .prediction-results {
+        position: relative;
+        z-index: 2;
+        clear: both;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -863,6 +904,9 @@ else:
         # Interactive Chart
         st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📈 Interactive Price Chart</h3>', unsafe_allow_html=True)
         
+        # Chart container with proper spacing
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        
         # Create the chart
         fig = go.Figure()
         
@@ -903,43 +947,71 @@ else:
             ema_20 = main_ticker_data['Close'].ewm(span=20).mean()
             fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_20, name='EMA 20', line=dict(color='#667eea', width=2, dash='dash')))
         
-        # Update layout
+        # Update layout with proper sizing and spacing
         fig.update_layout(
-            title=f"{selected_ticker} Price Chart",
+            title=dict(
+                text=f"{selected_ticker} Price Chart",
+                font=dict(size=20, color='white'),
+                x=0.5,
+                xanchor='center'
+            ),
             xaxis_title="Time",
             yaxis_title="Price ($)",
             template="plotly_dark",
-            height=700,
+            height=800,
             width=None,
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
+                y=-0.15,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=12)
             ),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white', size=12),
+            font=dict(color='white', size=14),
             xaxis=dict(
                 gridcolor='rgba(255,255,255,0.1)',
                 showgrid=True,
-                title_font=dict(size=14),
-                tickfont=dict(size=12)
+                title_font=dict(size=16),
+                tickfont=dict(size=12),
+                rangeslider=dict(visible=False)
             ),
             yaxis=dict(
                 gridcolor='rgba(255,255,255,0.1)',
                 showgrid=True,
-                title_font=dict(size=14),
-                tickfont=dict(size=12)
+                title_font=dict(size=16),
+                tickfont=dict(size=12),
+                fixedrange=False
             ),
-            margin=dict(l=50, r=50, t=80, b=50)
+            margin=dict(l=80, r=80, t=100, b=100),
+            autosize=True
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        # Display the chart in its own container
+        st.plotly_chart(fig, use_container_width=True, config={
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+            'toImageButtonOptions': {
+                'format': 'png',
+                'filename': f'{selected_ticker}_chart',
+                'height': 800,
+                'width': 1200,
+                'scale': 2
+            }
+        })
+        
+        # Close chart container
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Add spacing between chart and predictions
+        st.markdown("<div style='height: 3rem;'></div>", unsafe_allow_html=True)
         
         # AI Predictions Section
+        st.markdown('<div class="prediction-container">', unsafe_allow_html=True)
         st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
     
         # Handle sidebar prediction button
@@ -964,10 +1036,13 @@ else:
                         )
                         
                         if predicted_price is not None:
-                            # Display prediction results
+                            # Add clear separation before prediction results
+                            st.markdown("<div style='height: 2rem;'></div>", unsafe_allow_html=True)
+                            
+                            # Display prediction results in a dedicated container
                             st.markdown("""
-                            <div class="glass-card" style="margin: 2rem 0;">
-                                <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem;">🎯 AI Prediction Results</h3>
+                            <div class="glass-card" style="margin: 3rem 0; padding: 2rem; border: 2px solid rgba(102, 126, 234, 0.3);">
+                                <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem; font-size: 1.8rem;">🎯 AI Prediction Results</h3>
                             """, unsafe_allow_html=True)
                             
                             # Prediction metrics - emphasize predicted price
@@ -1064,6 +1139,9 @@ else:
                             
                             st.success("✅ Prediction saved to history!")
                             st.markdown("</div>", unsafe_allow_html=True)
+                            
+                            # Close prediction container
+                            st.markdown('</div>', unsafe_allow_html=True)
                             
                         else:
                             st.error("❌ Failed to generate prediction. Please check your data.")
