@@ -16,8 +16,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(
-    page_title="SOLARIS: AI Stock Prediction",
-    page_icon="🚀",
+    page_title="StockWise: AI Stock Prediction",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -50,18 +50,10 @@ st.markdown("""
         background: linear-gradient(45deg, #764ba2 0%, #667eea 100%);
     }
     
-    /* Animated Background */
+    /* Professional Background */
     body {
-        background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #f5576c, #4facfe, #00f2fe);
-        background-size: 400% 400%;
-        animation: gradientShift 15s ease infinite;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         font-family: 'Inter', sans-serif;
-    }
-    
-    @keyframes gradientShift {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
     }
     
     /* Glassmorphism Effect */
@@ -83,21 +75,11 @@ st.markdown("""
     
     /* Main Header */
     .main-header {
-        font-size: 4rem;
-        font-weight: 900;
-        background: linear-gradient(45deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        font-size: 3.5rem;
+        font-weight: 700;
+        color: white;
         text-align: center;
         margin-bottom: 0.5rem;
-        text-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
-        animation: subtle-glow 3s ease-in-out infinite alternate;
-    }
-    
-    @keyframes subtle-glow {
-        from { filter: drop-shadow(0 0 5px rgba(102, 126, 234, 0.3)); }
-        to { filter: drop-shadow(0 0 15px rgba(118, 75, 162, 0.5)); }
     }
     
     .sub-header {
@@ -284,26 +266,6 @@ st.markdown("""
         backdrop-filter: blur(10px);
     }
     
-    /* Floating Elements */
-    .floating {
-        animation: floating 3s ease-in-out infinite;
-    }
-    
-    @keyframes floating {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-    }
-    
-    /* Pulse Animation */
-    .pulse {
-        animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
-    }
     
     /* Subtle Glow */
     .neon-glow {
@@ -366,19 +328,15 @@ st.markdown("""
 
 # Navigation and App Structure
 st.markdown("""
-<div class="floating">
-    <h1 class="main-header">🚀 SOLARIS</h1>
-</div>
+<h1 class="main-header">📈 StockWise</h1>
 """, unsafe_allow_html=True)
 
 st.markdown("""
-<div class="pulse">
-    <h2 class="sub-header">✨ Next-Gen AI Stock Prediction Engine ✨</h2>
-</div>
+<h2 class="sub-header">Hybrid Machine Learning Stock Price Prediction System</h2>
 """, unsafe_allow_html=True)
 
 # Main Navigation Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📊 Analytics", "📈 Charts", "⚙️ Settings", "📚 Theory"])
+tab1, tab2, tab3 = st.tabs(["🏠 Dashboard", "🎯 Predictions", "📚 Theory"])
 
 PREDICTION_HISTORY_CSV = "prediction_history.csv"
 show_cols = ["timestamp", "ticker", "current_price", "predicted_price", "target_time", "actual_price", "error_pct", "error_abs", "confidence", "signal"]
@@ -1067,13 +1025,17 @@ else:
         fig.update_yaxes(range=[0, 100], row=rsi_row, col=1)
     st.plotly_chart(fig, use_container_width=True)
 
-# Charts Tab
-with tab4:
-    st.markdown('<h2 class="section-header">📈 Interactive Charts</h2>', unsafe_allow_html=True)
+# Theory Tab
+with tab3:
+    st.markdown('<h2 class="section-header">📚 Theory: Models and Indicators</h2>', unsafe_allow_html=True)
     
-    if main_ticker_data is not None and not main_ticker_data.empty and len(main_ticker_data) >= 128:
-        # Chart controls in the tab
-        chart_col1, chart_col2 = st.columns(2)
+    # --- Models Section ---
+    st.markdown("""
+    <div class="glass-card">
+        <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 1rem; text-align:center;">🧠 Models Used</h3>
+        <p style="color: rgba(255,255,255,0.85);">StockWise uses an ensemble of sequence models and tabular learners combined with a meta-learner.</p>
+    </div>
+    """, unsafe_allow_html=True)
         
         with chart_col1:
             st.markdown("### 📊 Chart Settings")
@@ -1411,7 +1373,7 @@ if cnn_model and lstm_model and xgb_model and meta_model and scaler:
                             pred_change_pct_formatted = f"{pred_change_pct:+.2f}%"
                             
                             st.markdown(f"""
-                            <div class="glass-card prediction-card pulse">
+                            <div class="glass-card">
                                 <div style="text-align: center;">
                                     <div style="font-size: 3rem; margin-bottom: 1rem;">{pred_icon}</div>
                                     <div style="font-size: 2.5rem; font-weight: 900; color: {pred_color}; margin-bottom: 0.5rem; text-shadow: 0 0 3px {pred_color}30;">
@@ -1620,7 +1582,7 @@ with tab6:
     st.markdown("""
     <div class="glass-card">
         <h3 style="color: rgba(255, 255, 255, 0.95); margin-bottom: 1rem; text-align:center;">🧠 Models Used</h3>
-        <p style="color: rgba(255,255,255,0.85);">SOLARIS uses an ensemble of sequence models and tabular learners combined with a meta-learner. If you later switch models (e.g., ARIMA or Random Forest), this section remains a template you can adapt.</p>
+        <p style="color: rgba(255,255,255,0.85);">StockWise uses an ensemble of sequence models and tabular learners combined with a meta-learner.</p>
     </div>
     """, unsafe_allow_html=True)
 
