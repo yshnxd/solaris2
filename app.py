@@ -324,36 +324,9 @@ st.markdown("""
         }
     }
     
-    /* Ensure proper sizing for charts and predictions - AGGRESSIVE */
+    /* Simple chart styling */
     .stPlotlyChart {
-        width: 100% !important;
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
-        flex-shrink: 0 !important;
-        flex-grow: 1 !important;
-    }
-    
-    .stPlotlyChart > div {
-        width: 100% !important;
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
-    }
-    
-    /* Fix plotly container sizing */
-    .js-plotly-plot {
-        width: 100% !important;
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
-    }
-    
-    /* Force chart to maintain size */
-    .plotly {
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
+        width: 100%;
     }
     
     .stMetric {
@@ -383,57 +356,13 @@ st.markdown("""
         margin: 1rem 0;
     }
     
-    /* Ensure proper separation between chart and predictions */
+    /* Simple separation between chart and predictions */
     .chart-container {
-        margin-bottom: 3rem;
-        padding-bottom: 2rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 2rem;
     }
     
     .prediction-container {
         margin-top: 2rem;
-        padding-top: 2rem;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    
-    /* Prevent chart from being compressed by other elements */
-    .stPlotlyChart {
-        position: relative;
-        z-index: 1;
-    }
-    
-    /* Ensure prediction cards don't interfere with chart */
-    .prediction-results {
-        position: relative;
-        z-index: 2;
-        clear: both;
-    }
-    
-    /* AGGRESSIVE chart sizing overrides */
-    div[data-testid="stPlotlyChart"] {
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
-    }
-    
-    div[data-testid="stPlotlyChart"] > div {
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
-    }
-    
-    /* Override any Streamlit container constraints */
-    .stPlotlyChart .plot-container {
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
-    }
-    
-    /* Force plotly to respect our sizing */
-    .plotly-graph-div {
-        height: 900px !important;
-        min-height: 900px !important;
-        max-height: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -985,76 +914,25 @@ else:
             ema_20 = main_ticker_data['Close'].ewm(span=20).mean()
             fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_20, name='EMA 20', line=dict(color='#667eea', width=2, dash='dash')))
         
-        # Update layout with aggressive sizing to prevent compression
+        # Simple, clean layout - let it be natural
         fig.update_layout(
-            title=dict(
-                text=f"{selected_ticker} Price Chart",
-                font=dict(size=18, color='white'),
-                x=0.5,
-                xanchor='center',
-                y=0.95
-            ),
+            title=f"{selected_ticker} Price Chart",
             xaxis_title="Time",
             yaxis_title="Price ($)",
             template="plotly_dark",
-            height=900,
-            width=None,
+            height=600,
             showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-0.05,
-                xanchor="center",
-                x=0.5,
-                font=dict(size=11),
-                bgcolor='rgba(0,0,0,0.5)',
-                bordercolor='rgba(255,255,255,0.2)'
-            ),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white', size=13),
-            xaxis=dict(
-                gridcolor='rgba(255,255,255,0.1)',
-                showgrid=True,
-                title_font=dict(size=14),
-                tickfont=dict(size=11),
-                rangeslider=dict(visible=False),
-                automargin=True
-            ),
-            yaxis=dict(
-                gridcolor='rgba(255,255,255,0.1)',
-                showgrid=True,
-                title_font=dict(size=14),
-                tickfont=dict(size=11),
-                fixedrange=False,
-                automargin=True
-            ),
-            margin=dict(l=60, r=60, t=60, b=60),
-            autosize=True,
-            bargap=0.1
+            font=dict(color='white'),
+            margin=dict(l=50, r=50, t=50, b=50)
         )
         
-        # Display the chart in its own container with explicit sizing
-        st.plotly_chart(fig, use_container_width=True, config={
-            'displayModeBar': True,
-            'displaylogo': False,
-            'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
-            'responsive': True,
-            'staticPlot': False,
-            'toImageButtonOptions': {
-                'format': 'png',
-                'filename': f'{selected_ticker}_chart',
-                'height': 900,
-                'width': 1400,
-                'scale': 2
-            }
-        })
+        # Simple chart display - no overrides
+        st.plotly_chart(fig, use_container_width=True)
         
         # Close chart container
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Add minimal spacing between chart and predictions
-        st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
         
         # AI Predictions Section
         st.markdown('<div class="prediction-container">', unsafe_allow_html=True)
@@ -1082,13 +960,10 @@ else:
                         )
                         
                         if predicted_price is not None:
-                            # Add clear separation before prediction results
-                            st.markdown("<div style='height: 2rem;'></div>", unsafe_allow_html=True)
-                            
-                            # Display prediction results in a dedicated container
+                            # Simple prediction results display
                             st.markdown("""
-                            <div class="glass-card" style="margin: 3rem 0; padding: 2rem; border: 2px solid rgba(102, 126, 234, 0.3);">
-                                <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem; font-size: 1.8rem;">🎯 AI Prediction Results</h3>
+                            <div class="glass-card" style="margin: 2rem 0;">
+                                <h3 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 2rem;">🎯 AI Prediction Results</h3>
                             """, unsafe_allow_html=True)
                             
                             # Prediction metrics - emphasize predicted price
