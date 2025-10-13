@@ -31,7 +31,8 @@ st.markdown("""
     .main .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
-        max-width: 1400px;
+        max-width: 100% !important;
+        width: 100% !important;
     }
     
     /* Custom Scrollbar */
@@ -324,9 +325,44 @@ st.markdown("""
         }
     }
     
-    /* Simple chart styling */
+    /* Fix chart and container width issues */
     .stPlotlyChart {
-        width: 100%;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    .stPlotlyChart > div {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Fix main container width and remove constraints */
+    .main .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+    
+    /* Override any width constraints from Streamlit */
+    .stApp > div {
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+    
+    /* Fix any column width issues */
+    .stColumn {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Fix plotly chart container */
+    div[data-testid="stPlotlyChart"] {
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
     }
     
     .stMetric {
@@ -343,17 +379,31 @@ st.markdown("""
         gap: 1rem;
     }
     
-    /* Ensure prediction cards are properly sized */
-    .prediction-card {
-        min-height: 200px;
-        width: 100%;
-    }
     
-    /* Fix glass card sizing */
+    /* Fix glass card and prediction card sizing */
     .glass-card {
         min-height: auto;
-        width: 100%;
+        width: 100% !important;
+        max-width: 100% !important;
         margin: 1rem 0;
+    }
+    
+    .prediction-card {
+        min-height: 200px;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Fix column containers */
+    .stColumns {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Fix metric containers */
+    .stMetric {
+        width: 100% !important;
+        max-width: 100% !important;
     }
     
     /* Simple separation between chart and predictions */
@@ -914,18 +964,20 @@ else:
             ema_20 = main_ticker_data['Close'].ewm(span=20).mean()
             fig.add_trace(go.Scatter(x=main_ticker_data.index, y=ema_20, name='EMA 20', line=dict(color='#667eea', width=2, dash='dash')))
         
-        # Simple, clean layout - let it be natural
+        # Layout with explicit width control
         fig.update_layout(
             title=f"{selected_ticker} Price Chart",
             xaxis_title="Time",
             yaxis_title="Price ($)",
             template="plotly_dark",
             height=600,
+            width=None,  # Let it use full container width
             showlegend=True,
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(color='white'),
-            margin=dict(l=50, r=50, t=50, b=50)
+            margin=dict(l=50, r=50, t=50, b=50),
+            autosize=True  # Enable responsive sizing
         )
         
         # Simple chart display - no overrides
