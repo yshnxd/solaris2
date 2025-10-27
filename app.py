@@ -509,7 +509,10 @@ def batch_evaluate_predictions_csv(csv_path, rate_limit_sec=0.5, hour_fetch_peri
     ensure_csv_has_header(csv_path, show_cols)
     try:
         df = pd.read_csv(csv_path)
-    except pd.errors.EmptyDataError:
+        if df.empty:
+            return pd.DataFrame(columns=show_cols)
+    except (pd.errors.EmptyDataError, FileNotFoundError, Exception) as e:
+        print(f"Error reading CSV: {e}")
         return pd.DataFrame(columns=show_cols)
     for col in ['timestamp', 'target_time']:
         if col in df.columns:
@@ -524,8 +527,10 @@ def batch_evaluate_predictions_csv(csv_path, rate_limit_sec=0.5, hour_fetch_peri
         if t=="" or pd.isna(row.get('target_time')):
             continue
         ticker_groups.setdefault(t, []).append(idx)
+    total_tickers = len(ticker_groups)
     for j, (ticker, indices) in enumerate(ticker_groups.items(), start=1):
         yf_ticker = ticker
+        print(f"Processing ticker {j}/{total_tickers}: {ticker}")
         try:
             tk = yf.Ticker(yf_ticker)
             hist_hour = tk.history(period=hour_fetch_period, interval='1h', actions=False, auto_adjust=False)
@@ -608,6 +613,19 @@ def load_models():
         return None, None, None, None, None
 
 cnn_model, lstm_model, xgb_model, meta_model, scaler = load_models()
+
+# Global button handlers (work from any tab)
+if evaluate_results:
+    if os.path.exists(PREDICTION_HISTORY_CSV):
+        with st.spinner("📋 Evaluating prediction history..."):
+            try:
+                updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
+                st.success("✅ Prediction history updated with actual prices!")
+                st.rerun()  # Refresh the page to show updated data
+            except Exception as e:
+                st.error(f"❌ Error evaluating predictions: {str(e)}")
+    else:
+        st.warning("📋 No prediction history found to evaluate.")
 
 original_cross_assets = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "JPM", "JNJ", "XOM", "CAT", "BA", "META"]
 dynamic_cross_assets = original_cross_assets.copy()
@@ -1124,14 +1142,6 @@ else:
                 except Exception as e:
                     st.error(f"❌ Error generating prediction: {str(e)}")
         
-        # Handle sidebar evaluate button
-        if evaluate_results:
-            if os.path.exists(PREDICTION_HISTORY_CSV):
-                with st.spinner("📋 Evaluating prediction history..."):
-                    updated_df = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
-                    st.success("✅ Prediction history updated with actual prices!")
-            else:
-                st.warning("📋 No prediction history found to evaluate.")
         
         # Handle sidebar watchlist button
         if run_watchlist:
