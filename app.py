@@ -1462,7 +1462,7 @@ with tab2:
                             </div>
                             <div>
                                 <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Actual Price</div>
-                                <div style="color: #f093fb; font-weight: 600;">${row.get('actual_price', 0):.2f if pd.notna(row.get('actual_price')) else 'N/A'}</div>
+                                <div style="color: #f093fb; font-weight: 600;">{'N/A' if not pd.notna(row.get('actual_price')) else f"${row.get('actual_price', 0):.2f}"}</div>
                             </div>
                             <div>
                                 <div style="color: rgba(255, 255, 255, 0.7); font-size: 0.9rem;">Error</div>
