@@ -507,23 +507,29 @@ with tab1:
                             st.text(f"Consensus: CNN {votes['CNN']} | LSTM {votes['LSTM']} | XGBoost {votes['XGBoost']}")
                             st.text(f"Confidence: {confidence:.1f}%")
 
-                            # Save to history (with sequential ID)
+                            # TIMESTAMP LOGIC: Capture exact time when prediction is made
+                            # Record current time as ISO format string for consistent storage
                             now = datetime.now()
                             target_time = now + timedelta(hours=1)
-                            ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
-                            next_id = get_next_prediction_id(PREDICTION_HISTORY_CSV)
-                            
-                            # Create prediction record with explicit string timestamps
                             timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
                             target_time_str = target_time.strftime('%Y-%m-%d %H:%M:%S')
                             
+                            # Display timestamp immediately in UI
+                            st.info(f"📅 Prediction created at: {timestamp_str} | Target time: {target_time_str}")
+                            
+                            # Ensure CSV file exists with proper headers
+                            ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
+                            next_id = get_next_prediction_id(PREDICTION_HISTORY_CSV)
+                            
+                            # TIMESTAMP LOGIC: Create prediction record with explicit timestamps
+                            # All timestamp fields are stored as formatted strings
                             prediction_record = {
                                 "prediction_id": next_id,
-                                "timestamp": timestamp_str,
+                                "timestamp": timestamp_str,  # Exact time prediction was made
                                 "ticker": selected_ticker,
                                 "current_price": current_price,
                                 "predicted_price": predicted_price,
-                                "target_time": target_time_str,
+                                "target_time": target_time_str,  # Time when prediction should be evaluated
                                 "actual_price": None,
                                 "error_pct": None,
                                 "error_abs": None,
@@ -531,40 +537,43 @@ with tab1:
                                 "signal": "HOLD",
                             }
                             
-                            # Read existing CSV - parse dates as strings to preserve format
+                            # TIMESTAMP LOGIC: Read existing CSV while preserving timestamp format
+                            # Use low_memory=False and explicit dtype to prevent auto-parsing of dates
                             try:
-                                df_hist = pd.read_csv(
-                                    PREDICTION_HISTORY_CSV,
-                                    dtype={'timestamp': str, 'target_time': str},
-                                    parse_dates=False
-                                )
-                            except Exception:
+                                df_hist = pd.read_csv(PREDICTION_HISTORY_CSV, low_memory=False)
+                                # Ensure timestamp columns are strings (pandas may auto-convert)
+                                if 'timestamp' in df_hist.columns:
+                                    df_hist['timestamp'] = df_hist['timestamp'].astype(str).replace('nan', '')
+                                if 'target_time' in df_hist.columns:
+                                    df_hist['target_time'] = df_hist['target_time'].astype(str).replace('nan', '')
+                            except Exception as e:
+                                # If reading fails, create empty dataframe with correct structure
                                 df_hist = pd.DataFrame(columns=show_cols)
                             
-                            # Convert timestamp columns to strings if they exist
-                            for col in ['timestamp', 'target_time']:
-                                if col in df_hist.columns:
-                                    df_hist[col] = df_hist[col].astype(str)
-                                    df_hist[col] = df_hist[col].replace('nan', '').replace('NaT', '')
-                            
-                            # Create new row dataframe with all columns
+                            # TIMESTAMP LOGIC: Add new prediction row with timestamps
+                            # Create dataframe from record, ensuring all required columns exist
                             new_row = pd.DataFrame([prediction_record])
-                            # Ensure all columns exist in new_row
+                            # Make sure new row has all required columns
                             for col in show_cols:
                                 if col not in new_row.columns:
                                     new_row[col] = None
+                            new_row = new_row[show_cols]  # Reorder to match show_cols
                             
-                            # Concatenate and ensure timestamps are strings
-                            df_hist = pd.concat([df_hist, new_row], ignore_index=True)
+                            # Concatenate with existing data
+                            df_hist = pd.concat([df_hist, new_row], ignore_index=True, sort=False)
                             
-                            # Final check - ensure timestamp columns are strings
+                            # TIMESTAMP LOGIC: Final validation - ensure timestamps are preserved as strings
+                            # Convert any datetime objects back to strings before saving
                             for col in ['timestamp', 'target_time']:
                                 if col in df_hist.columns:
-                                    df_hist[col] = df_hist[col].astype(str).replace('nan', '').replace('None', '')
+                                    df_hist[col] = df_hist[col].apply(
+                                        lambda x: x if isinstance(x, str) and x != 'nan' and x != '' 
+                                        else (x.strftime('%Y-%m-%d %H:%M:%S') if hasattr(x, 'strftime') else str(x) if pd.notna(x) else '')
+                                    )
                             
-                            # Save to CSV
+                            # Save to CSV - timestamps should now be properly formatted strings
                             df_hist.to_csv(PREDICTION_HISTORY_CSV, index=False)
-                            st.success(f"Prediction saved to history (ID {next_id}).")
+                            st.success(f"✅ Prediction saved to history (ID {next_id}) at {timestamp_str}")
                         else:
                             st.error("Failed to generate prediction.")
                     else:
@@ -610,21 +619,22 @@ with tab1:
                                         "votes": votes_w,
                                     }
                                 )
-                                # Log to history with sequential ID and times
+                                # TIMESTAMP LOGIC: Capture exact time when watchlist prediction is made
+                                # Record current time for this specific stock prediction
                                 now = datetime.now()
                                 target_time = now + timedelta(hours=1)
-                                
-                                # Create prediction record with explicit string timestamps
                                 timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
                                 target_time_str = target_time.strftime('%Y-%m-%d %H:%M:%S')
                                 
+                                # TIMESTAMP LOGIC: Create prediction record with explicit timestamps
+                                # All timestamp fields are stored as formatted strings
                                 prediction_record = {
                                     "prediction_id": next_id,
-                                    "timestamp": timestamp_str,
+                                    "timestamp": timestamp_str,  # Exact time prediction was made
                                     "ticker": stock,
                                     "current_price": cur_px,
                                     "predicted_price": pred_px,
-                                    "target_time": target_time_str,
+                                    "target_time": target_time_str,  # Time when prediction should be evaluated
                                     "actual_price": None,
                                     "error_pct": None,
                                     "error_abs": None,
@@ -632,38 +642,40 @@ with tab1:
                                     "signal": "HOLD",
                                 }
                                 
-                                # Read existing CSV - parse dates as strings to preserve format
+                                # TIMESTAMP LOGIC: Read existing CSV while preserving timestamp format
+                                # Use low_memory=False to prevent pandas from auto-parsing dates
                                 try:
-                                    df_hist = pd.read_csv(
-                                        PREDICTION_HISTORY_CSV,
-                                        dtype={'timestamp': str, 'target_time': str},
-                                        parse_dates=False
-                                    )
+                                    df_hist = pd.read_csv(PREDICTION_HISTORY_CSV, low_memory=False)
+                                    # Ensure timestamp columns are strings (pandas may auto-convert)
+                                    if 'timestamp' in df_hist.columns:
+                                        df_hist['timestamp'] = df_hist['timestamp'].astype(str).replace('nan', '')
+                                    if 'target_time' in df_hist.columns:
+                                        df_hist['target_time'] = df_hist['target_time'].astype(str).replace('nan', '')
                                 except Exception:
                                     df_hist = pd.DataFrame(columns=show_cols)
                                 
-                                # Convert timestamp columns to strings if they exist
-                                for col in ['timestamp', 'target_time']:
-                                    if col in df_hist.columns:
-                                        df_hist[col] = df_hist[col].astype(str)
-                                        df_hist[col] = df_hist[col].replace('nan', '').replace('NaT', '')
-                                
-                                # Create new row dataframe with all columns
+                                # TIMESTAMP LOGIC: Add new prediction row with timestamps
+                                # Create dataframe from record, ensuring all required columns exist
                                 new_row = pd.DataFrame([prediction_record])
-                                # Ensure all columns exist in new_row
+                                # Make sure new row has all required columns
                                 for col in show_cols:
                                     if col not in new_row.columns:
                                         new_row[col] = None
+                                new_row = new_row[show_cols]  # Reorder to match show_cols
                                 
-                                # Concatenate and ensure timestamps are strings
-                                df_hist = pd.concat([df_hist, new_row], ignore_index=True)
+                                # Concatenate with existing data
+                                df_hist = pd.concat([df_hist, new_row], ignore_index=True, sort=False)
                                 
-                                # Final check - ensure timestamp columns are strings
+                                # TIMESTAMP LOGIC: Final validation - ensure timestamps are preserved as strings
+                                # Convert any datetime objects back to strings before saving
                                 for col in ['timestamp', 'target_time']:
                                     if col in df_hist.columns:
-                                        df_hist[col] = df_hist[col].astype(str).replace('nan', '').replace('None', '')
+                                        df_hist[col] = df_hist[col].apply(
+                                            lambda x: x if isinstance(x, str) and x != 'nan' and x != '' 
+                                            else (x.strftime('%Y-%m-%d %H:%M:%S') if hasattr(x, 'strftime') else str(x) if pd.notna(x) else '')
+                                        )
                                 
-                                # Save to CSV
+                                # Save to CSV - timestamps should now be properly formatted strings
                                 df_hist.to_csv(PREDICTION_HISTORY_CSV, index=False)
                                 next_id += 1
                 except Exception as e:
@@ -748,20 +760,35 @@ with tab2:
                 # Full detailed table
                 st.subheader("Full Detailed Table")
                 df_full = history_df.copy()
+                
+                # TIMESTAMP LOGIC: Handle timestamp columns for display
+                # Try to convert to datetime for better sorting, but preserve original string format
                 for col in ["timestamp", "target_time"]:
                     if col in df_full.columns:
-                        df_full[col] = pd.to_datetime(df_full[col], errors="coerce")
-                df_full = df_full.sort_values("timestamp", ascending=False)
+                        # First convert any NaN to empty string
+                        df_full[col] = df_full[col].fillna('')
+                        # Try to convert to datetime for sorting, but keep original format
+                        df_full[col + '_sort'] = pd.to_datetime(df_full[col], errors='coerce')
+                
+                # Sort by timestamp if available
+                if "timestamp_sort" in df_full.columns:
+                    df_full = df_full.sort_values("timestamp_sort", ascending=False, na_position='last')
+                    df_full = df_full.drop(columns=["timestamp_sort"])
+                    if "target_time_sort" in df_full.columns:
+                        df_full = df_full.drop(columns=["target_time_sort"])
+                
                 st.dataframe(df_full, use_container_width=True)
 
                 # Simplified table
                 st.subheader("Simplified View")
+                # TIMESTAMP LOGIC: Simplified view includes timestamps for quick reference
+                # Timestamps are displayed as stored strings for clarity
                 simplified_cols = [
                     col for col in [
                         "prediction_id",
                         "ticker",
-                        "timestamp",
-                        "target_time",
+                        "timestamp",      # When prediction was made
+                        "target_time",   # When prediction should be evaluated
                         "current_price",
                         "predicted_price",
                         "actual_price",
@@ -769,10 +796,14 @@ with tab2:
                     if col in df_full.columns
                 ]
                 df_simple = df_full[simplified_cols].copy()
-                # Basic formatting
+                # Basic formatting - preserve timestamps as strings, format numeric columns
                 for c in ["current_price", "predicted_price", "actual_price"]:
                     if c in df_simple.columns:
                         df_simple[c] = pd.to_numeric(df_simple[c], errors="coerce")
+                # Ensure timestamp columns remain as strings for display
+                for c in ["timestamp", "target_time"]:
+                    if c in df_simple.columns:
+                        df_simple[c] = df_simple[c].astype(str).replace('nan', '').replace('NaT', '')
                 st.dataframe(df_simple, use_container_width=True)
             else:
                 st.info("No prediction history yet.")
