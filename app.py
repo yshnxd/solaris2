@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(
-    page_title="StockWise: AI Stock Prediction",
+    page_title="StockWise: ML Based Stock Price Prediction",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -338,28 +338,31 @@ st.markdown("""
         max-width: 100% !important;
     }
     
-    /* Fix main container width and remove constraints */
-    .main .block-container {
+    /* Fix main container width and remove constraints (robust selectors) */
+    .stApp [data-testid="block-container"] {
         padding-left: 1rem !important;
         padding-right: 1rem !important;
         max-width: 100% !important;
         width: 100% !important;
     }
     
-    /* Override any width constraints from Streamlit */
-    .stApp > div {
+    /* Override any width constraints from Streamlit root containers */
+    .stApp,
+    .stApp > div,
+    .stApp [data-testid="stAppViewContainer"],
+    .stApp [data-testid="stMain"] {
         max-width: 100% !important;
         width: 100% !important;
     }
     
     /* Fix any column width issues */
-    .stColumn {
+    [data-testid="column"] {
         width: 100% !important;
         max-width: 100% !important;
     }
     
     /* Fix plotly chart container */
-    div[data-testid="stPlotlyChart"] {
+    [data-testid="stPlotlyChart"] {
         width: 100% !important;
         min-width: 100% !important;
         max-width: 100% !important;
