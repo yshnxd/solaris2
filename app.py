@@ -125,14 +125,30 @@ def get_next_prediction_id(csv_path: str) -> int:
 
 
 def batch_evaluate_predictions_csv(csv_path: str, rate_limit_sec: float = 0.5, hour_fetch_period: str = "730d") -> pd.DataFrame:
+    """
+    TIMESTAMP LOGIC: This function evaluates predictions by filling in actual prices.
+    It preserves original timestamp strings while using datetime objects for time comparisons.
+    """
     ensure_csv_has_header(csv_path, show_cols)
     try:
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, low_memory=False)
         if df.empty:
             return pd.DataFrame(columns=show_cols)
     except (pd.errors.EmptyDataError, FileNotFoundError, Exception):
         return pd.DataFrame(columns=show_cols)
 
+    # TIMESTAMP LOGIC: Preserve original timestamp strings before converting to datetime
+    # We need datetime objects for time comparisons, but must restore strings before saving
+    timestamp_strings = pd.Series(dtype=object)
+    target_time_strings = pd.Series(dtype=object)
+    if "timestamp" in df.columns:
+        # Save original string values before converting to datetime
+        timestamp_strings = df["timestamp"].copy().astype(str)
+    if "target_time" in df.columns:
+        # Save original string values before converting to datetime
+        target_time_strings = df["target_time"].copy().astype(str)
+    
+    # Convert to datetime for time-based operations (comparisons, floor, normalize)
     for col in ["timestamp", "target_time"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
@@ -217,6 +233,25 @@ def batch_evaluate_predictions_csv(csv_path: str, rate_limit_sec: float = 0.5, h
 
         time.sleep(rate_limit_sec)
 
+    # TIMESTAMP LOGIC: Restore original timestamp strings before saving
+    # Replace datetime columns with original string values to preserve format
+    if "timestamp" in df.columns and len(timestamp_strings) > 0:
+        # Restore original strings - align by index
+        df["timestamp"] = timestamp_strings.reindex(df.index).fillna(df["timestamp"].astype(str))
+    
+    if "target_time" in df.columns and len(target_time_strings) > 0:
+        # Restore original strings - align by index
+        df["target_time"] = target_time_strings.reindex(df.index).fillna(df["target_time"].astype(str))
+    
+    # TIMESTAMP LOGIC: Final validation - ensure all timestamp columns are strings before saving
+    # Convert any datetime objects that couldn't be restored to strings
+    for col in ["timestamp", "target_time"]:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: x if isinstance(x, str) and str(x).strip() not in ['', 'nan', 'NaT']
+                else (x.strftime('%Y-%m-%d %H:%M:%S') if hasattr(x, 'strftime') and pd.notna(x) else (str(x) if pd.notna(x) else ''))
+            )
+    
     df.to_csv(csv_path, index=False)
     return df
 
