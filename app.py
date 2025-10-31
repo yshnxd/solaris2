@@ -63,7 +63,7 @@ st.markdown("""
         backdrop-filter: blur(20px);
         border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 20px;
-        padding: 2rem;
+        padding: 1.25rem;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         transition: all 0.3s ease;
     }
@@ -340,8 +340,8 @@ st.markdown("""
     
     /* Fix main container width and remove constraints (robust selectors) */
     .stApp [data-testid="block-container"] {
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
         max-width: 100% !important;
         width: 100% !important;
     }
@@ -400,7 +400,7 @@ st.markdown("""
         min-height: auto;
         width: 100% !important;
         max-width: 100% !important;
-        margin: 1rem 0;
+        margin: 0.5rem 0;
     }
     
     .prediction-card {
@@ -952,7 +952,7 @@ else:
             """, unsafe_allow_html=True)
 
         # Place chart and predictions side-by-side
-        left_col, right_col = st.columns([2, 1], gap="large")
+        left_col, right_col = st.columns([2, 1], gap="small")
 
         with left_col:
             # Interactive Chart
@@ -1010,7 +1010,7 @@ else:
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='white'),
-                margin=dict(l=10, r=10, t=40, b=10),
+                margin=dict(l=0, r=0, t=30, b=0),
                 # Let Streamlit container control width
             )
             
