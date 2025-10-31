@@ -666,25 +666,43 @@ with tab2:
                 c5, _ = st.columns(2)
                 c5.metric("Avg Confidence", f"{avg_confidence:.1f}%")
 
-                colA, colB = st.columns(2)
+                colA, _ = st.columns(2)
                 with colA:
                     if st.button("Refresh Actual Prices"):
                         with st.spinner("Updating actual prices..."):
                             _ = batch_evaluate_predictions_csv(PREDICTION_HISTORY_CSV)
                             st.success("Actual prices updated.")
                             st.rerun()
-                with colB:
-                    if st.button("View Detailed Table"):
-                        df_disp = history_df.copy()
-                        for col in ["timestamp", "target_time"]:
-                            if col in df_disp.columns:
-                                df_disp[col] = pd.to_datetime(df_disp[col], errors="coerce")
-                        st.dataframe(df_disp, use_container_width=True)
 
-                # Recent
-                st.subheader("Recent Predictions")
-                recent_df = history_df.sort_values("timestamp", ascending=False).head(10)
-                st.dataframe(recent_df, use_container_width=True)
+                # Full detailed table
+                st.subheader("Full Detailed Table")
+                df_full = history_df.copy()
+                for col in ["timestamp", "target_time"]:
+                    if col in df_full.columns:
+                        df_full[col] = pd.to_datetime(df_full[col], errors="coerce")
+                df_full = df_full.sort_values("timestamp", ascending=False)
+                st.dataframe(df_full, use_container_width=True)
+
+                # Simplified table
+                st.subheader("Simplified View")
+                simplified_cols = [
+                    col for col in [
+                        "prediction_id",
+                        "ticker",
+                        "timestamp",
+                        "target_time",
+                        "current_price",
+                        "predicted_price",
+                        "actual_price",
+                    ]
+                    if col in df_full.columns
+                ]
+                df_simple = df_full[simplified_cols].copy()
+                # Basic formatting
+                for c in ["current_price", "predicted_price", "actual_price"]:
+                    if c in df_simple.columns:
+                        df_simple[c] = pd.to_numeric(df_simple[c], errors="coerce")
+                st.dataframe(df_simple, use_container_width=True)
             else:
                 st.info("No prediction history yet.")
         except Exception as e:
