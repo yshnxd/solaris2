@@ -351,12 +351,16 @@ st.markdown("""
     .stApp > div,
     .stApp [data-testid="stAppViewContainer"],
     .stApp [data-testid="stMain"] {
-        max-width: 100% !important;
-        width: 100% !important;
+        max-width: 100vw !important;
+        width: 100vw !important;
     }
+    html, body { width: 100vw; overflow-x: hidden; }
     
     /* Fix any column width issues */
-    [data-testid="column"] {
+    [data-testid="stHorizontalBlock"],
+    [data-testid="stVerticalBlock"],
+    [data-testid="column"],
+    [data-testid="stSidebarNav"] {
         width: 100% !important;
         max-width: 100% !important;
     }
@@ -365,6 +369,14 @@ st.markdown("""
     [data-testid="stPlotlyChart"] {
         width: 100% !important;
         min-width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    /* Ensure custom containers stretch */
+    .chart-container,
+    .prediction-container,
+    .glass-card {
+        width: 100% !important;
         max-width: 100% !important;
     }
     
@@ -1001,7 +1013,7 @@ else:
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='white'),
-                margin=dict(l=50, r=50, t=50, b=50),
+                margin=dict(l=10, r=10, t=40, b=10),
                 autosize=True
             )
             
