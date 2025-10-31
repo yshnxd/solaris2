@@ -466,8 +466,8 @@ if evaluate_results:
         st.info("No prediction history found.")
 
 with tab1:
-    st.title("StockWise (Simple)")
-    st.caption("Hybrid Machine Learning Stock Price Prediction (clean UI)")
+    st.title("StockWise")
+    st.caption("Hourly Stock Price Prediction using Hybrid Machine Learning")
 
     # Fetch data
     main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
