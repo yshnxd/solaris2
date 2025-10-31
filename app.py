@@ -526,7 +526,20 @@ with tab1:
                                 "signal": "HOLD",
                             }
                             df_hist = pd.read_csv(PREDICTION_HISTORY_CSV)
+                            # Convert timestamp columns to strings if they exist
+                            for col in ['timestamp', 'target_time']:
+                                if col in df_hist.columns:
+                                    # Convert any datetime objects to ISO format strings, keep strings as-is
+                                    df_hist[col] = df_hist[col].apply(
+                                        lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
+                                    )
                             df_hist = pd.concat([df_hist, pd.DataFrame([prediction_record])], ignore_index=True)
+                            # Ensure all timestamp columns are strings before saving
+                            for col in ['timestamp', 'target_time']:
+                                if col in df_hist.columns:
+                                    df_hist[col] = df_hist[col].apply(
+                                        lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
+                                    )
                             df_hist.to_csv(PREDICTION_HISTORY_CSV, index=False)
                             st.success(f"Prediction saved to history (ID {next_id}).")
                         else:
@@ -592,9 +605,22 @@ with tab1:
                                 }
                                 try:
                                     df_hist = pd.read_csv(PREDICTION_HISTORY_CSV)
+                                    # Convert timestamp columns to strings if they exist
+                                    for col in ['timestamp', 'target_time']:
+                                        if col in df_hist.columns:
+                                            # Convert any datetime objects to ISO format strings, keep strings as-is
+                                            df_hist[col] = df_hist[col].apply(
+                                                lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
+                                            )
                                 except Exception:
                                     df_hist = pd.DataFrame(columns=show_cols)
                                 df_hist = pd.concat([df_hist, pd.DataFrame([prediction_record])], ignore_index=True)
+                                # Ensure all timestamp columns are strings before saving
+                                for col in ['timestamp', 'target_time']:
+                                    if col in df_hist.columns:
+                                        df_hist[col] = df_hist[col].apply(
+                                            lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
+                                        )
                                 df_hist.to_csv(PREDICTION_HISTORY_CSV, index=False)
                                 next_id += 1
                 except Exception as e:
