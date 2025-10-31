@@ -1031,8 +1031,7 @@ else:
                             )
                             
                             if predicted_price is not None:
-                                st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-                                st.markdown('<h4 style="color: rgba(255, 255, 255, 0.9); text-align: center; margin-bottom: 1rem;">🎯 Prediction Results</h4>', unsafe_allow_html=True)
+                                st.subheader("🎯 Prediction Results")
                                 
                                 # Price metrics
                                 price_col1, price_col2 = st.columns(2, gap="small")
@@ -1106,8 +1105,6 @@ else:
                                         <div style="font-size: 1rem; color: {vote_color}; font-weight: 700;">{votes["XGBoost"]}</div>
                                     </div>
                                     """, unsafe_allow_html=True)
-                                
-                                st.markdown('</div>', unsafe_allow_html=True)
                                 
                                 # Save prediction to history
                                 target_time = datetime.now() + timedelta(hours=1)
