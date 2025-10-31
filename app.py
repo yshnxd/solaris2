@@ -512,34 +512,57 @@ with tab1:
                             target_time = now + timedelta(hours=1)
                             ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
                             next_id = get_next_prediction_id(PREDICTION_HISTORY_CSV)
+                            
+                            # Create prediction record with explicit string timestamps
+                            timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
+                            target_time_str = target_time.strftime('%Y-%m-%d %H:%M:%S')
+                            
                             prediction_record = {
                                 "prediction_id": next_id,
-                                "timestamp": now.isoformat(),
+                                "timestamp": timestamp_str,
                                 "ticker": selected_ticker,
                                 "current_price": current_price,
                                 "predicted_price": predicted_price,
-                                "target_time": target_time.isoformat(),
+                                "target_time": target_time_str,
                                 "actual_price": None,
                                 "error_pct": None,
                                 "error_abs": None,
                                 "confidence": confidence,
                                 "signal": "HOLD",
                             }
-                            df_hist = pd.read_csv(PREDICTION_HISTORY_CSV)
+                            
+                            # Read existing CSV - parse dates as strings to preserve format
+                            try:
+                                df_hist = pd.read_csv(
+                                    PREDICTION_HISTORY_CSV,
+                                    dtype={'timestamp': str, 'target_time': str},
+                                    parse_dates=False
+                                )
+                            except Exception:
+                                df_hist = pd.DataFrame(columns=show_cols)
+                            
                             # Convert timestamp columns to strings if they exist
                             for col in ['timestamp', 'target_time']:
                                 if col in df_hist.columns:
-                                    # Convert any datetime objects to ISO format strings, keep strings as-is
-                                    df_hist[col] = df_hist[col].apply(
-                                        lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
-                                    )
-                            df_hist = pd.concat([df_hist, pd.DataFrame([prediction_record])], ignore_index=True)
-                            # Ensure all timestamp columns are strings before saving
+                                    df_hist[col] = df_hist[col].astype(str)
+                                    df_hist[col] = df_hist[col].replace('nan', '').replace('NaT', '')
+                            
+                            # Create new row dataframe with all columns
+                            new_row = pd.DataFrame([prediction_record])
+                            # Ensure all columns exist in new_row
+                            for col in show_cols:
+                                if col not in new_row.columns:
+                                    new_row[col] = None
+                            
+                            # Concatenate and ensure timestamps are strings
+                            df_hist = pd.concat([df_hist, new_row], ignore_index=True)
+                            
+                            # Final check - ensure timestamp columns are strings
                             for col in ['timestamp', 'target_time']:
                                 if col in df_hist.columns:
-                                    df_hist[col] = df_hist[col].apply(
-                                        lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
-                                    )
+                                    df_hist[col] = df_hist[col].astype(str).replace('nan', '').replace('None', '')
+                            
+                            # Save to CSV
                             df_hist.to_csv(PREDICTION_HISTORY_CSV, index=False)
                             st.success(f"Prediction saved to history (ID {next_id}).")
                         else:
@@ -590,37 +613,57 @@ with tab1:
                                 # Log to history with sequential ID and times
                                 now = datetime.now()
                                 target_time = now + timedelta(hours=1)
+                                
+                                # Create prediction record with explicit string timestamps
+                                timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
+                                target_time_str = target_time.strftime('%Y-%m-%d %H:%M:%S')
+                                
                                 prediction_record = {
                                     "prediction_id": next_id,
-                                    "timestamp": now.isoformat(),
+                                    "timestamp": timestamp_str,
                                     "ticker": stock,
                                     "current_price": cur_px,
                                     "predicted_price": pred_px,
-                                    "target_time": target_time.isoformat(),
+                                    "target_time": target_time_str,
                                     "actual_price": None,
                                     "error_pct": None,
                                     "error_abs": None,
                                     "confidence": conf,
                                     "signal": "HOLD",
                                 }
+                                
+                                # Read existing CSV - parse dates as strings to preserve format
                                 try:
-                                    df_hist = pd.read_csv(PREDICTION_HISTORY_CSV)
-                                    # Convert timestamp columns to strings if they exist
-                                    for col in ['timestamp', 'target_time']:
-                                        if col in df_hist.columns:
-                                            # Convert any datetime objects to ISO format strings, keep strings as-is
-                                            df_hist[col] = df_hist[col].apply(
-                                                lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
-                                            )
+                                    df_hist = pd.read_csv(
+                                        PREDICTION_HISTORY_CSV,
+                                        dtype={'timestamp': str, 'target_time': str},
+                                        parse_dates=False
+                                    )
                                 except Exception:
                                     df_hist = pd.DataFrame(columns=show_cols)
-                                df_hist = pd.concat([df_hist, pd.DataFrame([prediction_record])], ignore_index=True)
-                                # Ensure all timestamp columns are strings before saving
+                                
+                                # Convert timestamp columns to strings if they exist
                                 for col in ['timestamp', 'target_time']:
                                     if col in df_hist.columns:
-                                        df_hist[col] = df_hist[col].apply(
-                                            lambda x: x.isoformat() if hasattr(x, 'isoformat') and not pd.isna(x) else ('' if pd.isna(x) else str(x))
-                                        )
+                                        df_hist[col] = df_hist[col].astype(str)
+                                        df_hist[col] = df_hist[col].replace('nan', '').replace('NaT', '')
+                                
+                                # Create new row dataframe with all columns
+                                new_row = pd.DataFrame([prediction_record])
+                                # Ensure all columns exist in new_row
+                                for col in show_cols:
+                                    if col not in new_row.columns:
+                                        new_row[col] = None
+                                
+                                # Concatenate and ensure timestamps are strings
+                                df_hist = pd.concat([df_hist, new_row], ignore_index=True)
+                                
+                                # Final check - ensure timestamp columns are strings
+                                for col in ['timestamp', 'target_time']:
+                                    if col in df_hist.columns:
+                                        df_hist[col] = df_hist[col].astype(str).replace('nan', '').replace('None', '')
+                                
+                                # Save to CSV
                                 df_hist.to_csv(PREDICTION_HISTORY_CSV, index=False)
                                 next_id += 1
                 except Exception as e:
