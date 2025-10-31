@@ -14,7 +14,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Basic page config (simple, no custom CSS)
-st.set_page_config(page_title="StockWise: Simple", page_icon="📈", layout="wide")
+st.set_page_config(page_title="StockWise", page_icon="📈", layout="wide")
 
 # Constants
 PREDICTION_HISTORY_CSV = "solaris-data.csv"
@@ -508,16 +508,17 @@ with tab1:
                             st.text(f"Confidence: {confidence:.1f}%")
 
                             # Save to history (with sequential ID)
-                            target_time = datetime.now() + timedelta(hours=1)
+                            now = datetime.now()
+                            target_time = now + timedelta(hours=1)
                             ensure_csv_has_header(PREDICTION_HISTORY_CSV, show_cols)
                             next_id = get_next_prediction_id(PREDICTION_HISTORY_CSV)
                             prediction_record = {
                                 "prediction_id": next_id,
-                                "timestamp": datetime.now(),
+                                "timestamp": now.isoformat(),
                                 "ticker": selected_ticker,
                                 "current_price": current_price,
                                 "predicted_price": predicted_price,
-                                "target_time": target_time,
+                                "target_time": target_time.isoformat(),
                                 "actual_price": None,
                                 "error_pct": None,
                                 "error_abs": None,
@@ -574,14 +575,15 @@ with tab1:
                                     }
                                 )
                                 # Log to history with sequential ID and times
-                                target_time = datetime.now() + timedelta(hours=1)
+                                now = datetime.now()
+                                target_time = now + timedelta(hours=1)
                                 prediction_record = {
                                     "prediction_id": next_id,
-                                    "timestamp": datetime.now(),
+                                    "timestamp": now.isoformat(),
                                     "ticker": stock,
                                     "current_price": cur_px,
                                     "predicted_price": pred_px,
-                                    "target_time": target_time,
+                                    "target_time": target_time.isoformat(),
                                     "actual_price": None,
                                     "error_pct": None,
                                     "error_abs": None,
