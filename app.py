@@ -956,10 +956,7 @@ else:
 
         with left_col:
             # Interactive Chart
-            st.markdown('<h3 style="color: rgba(255, 255, 255, 0.9); margin: 2rem 0 1rem 0;">📈 Interactive Price Chart</h3>', unsafe_allow_html=True)
-            
-            # Chart container with proper spacing
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.subheader("📈 Interactive Price Chart")
             
             # Create the chart
             fig = go.Figure()
@@ -1014,19 +1011,15 @@ else:
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='white'),
                 margin=dict(l=10, r=10, t=40, b=10),
-                autosize=True
+                # Let Streamlit container control width
             )
             
             # Chart display
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Close chart container
-            st.markdown('</div>', unsafe_allow_html=True)
 
         with right_col:
             # AI Predictions Section
-            st.markdown('<div class="prediction-container">', unsafe_allow_html=True)
-            st.markdown('<h2 class="section-header">🎯 AI Predictions</h2>', unsafe_allow_html=True)
+            st.subheader("🎯 AI Predictions")
         
             # Handle sidebar prediction button
             prediction_triggered = False
