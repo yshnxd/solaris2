@@ -179,13 +179,24 @@ def generate_suggestion(current_price: float, predicted_price: float, pred_chang
         )
     else:
         suggestion = "⚪ HOLD"
-        explanation = (
-            f"The models predict minimal movement ({pred_change:+.2f}%) with {confidence:.1f}% confidence. "
-            f"The predicted price ${predicted_price:.2f} is close to the current price of ${current_price:.2f}. "
-            f"Model consensus is mixed: {up_votes} models suggest up, {down_votes} suggest down. "
-            f"This suggests sideways movement or uncertainty. Consider waiting for clearer signals or "
-            f"maintaining current positions."
-        )
+        # Determine consensus message based on model agreement
+        if up_votes == 3:
+            consensus_msg = f"All {up_votes} models agree on upward direction, but the predicted change is minimal."
+            movement_msg = "The minimal predicted movement suggests sideways trading or consolidation."
+        elif down_votes == 3:
+            consensus_msg = f"All {down_votes} models agree on downward direction, but the predicted change is minimal."
+            movement_msg = "The minimal predicted movement suggests sideways trading or consolidation."
+        elif up_votes > down_votes:
+            consensus_msg = f"Model consensus is mixed: {up_votes} models suggest up, {down_votes} suggest down."
+            movement_msg = "This suggests sideways movement or uncertainty."
+        elif down_votes > up_votes:
+            consensus_msg = f"Model consensus is mixed: {down_votes} models suggest down, {up_votes} suggest up."
+            movement_msg = "This suggests sideways movement or uncertainty."
+        else:
+            consensus_msg = "Model consensus is mixed with no clear direction."
+            movement_msg = "This suggests sideways movement or uncertainty."
+        
+        explanation = f"The models predict minimal movement ({pred_change:+.2f}%) with {confidence:.1f}% confidence. The predicted price ${predicted_price:.2f} is close to the current price of ${current_price:.2f}. {consensus_msg} {movement_msg} Consider waiting for clearer signals or maintaining current positions."
     
     return suggestion, explanation
 
@@ -643,7 +654,7 @@ with tab1:
                             st.markdown("---")
                             st.subheader("💡 Trading Suggestion")
                             st.markdown(f"### {suggestion}")
-                            st.info(explanation)
+                            st.write(explanation)
 
                             # TIMESTAMP LOGIC: Capture exact time when prediction is made
                             # Record current time as ISO format string for consistent storage
