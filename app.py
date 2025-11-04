@@ -110,6 +110,86 @@ def compute_signal(predicted, actual, buy_threshold_pct: float = 0.25, sell_thre
     return "HOLD"
 
 
+def generate_suggestion(current_price: float, predicted_price: float, pred_change_pct: float, confidence: float, votes: dict) -> tuple[str, str]:
+    """
+    Generate trading suggestion and explanation based on prediction results.
+    Returns: (suggestion, explanation)
+    """
+    # Determine suggestion based on predicted change and confidence
+    strong_buy_threshold = 0.5  # % change threshold for strong buy
+    buy_threshold = 0.1  # % change threshold for buy
+    sell_threshold = -0.1  # % change threshold for sell
+    strong_sell_threshold = -0.5  # % change threshold for strong sell
+    high_confidence = 70  # Confidence threshold for high confidence
+    
+    pred_change = pred_change_pct
+    
+    # Count model votes
+    up_votes = sum(1 for v in votes.values() if v == "UP")
+    down_votes = sum(1 for v in votes.values() if v == "DOWN")
+    
+    # Generate suggestion based on predicted change and confidence
+    if pred_change >= strong_buy_threshold and confidence >= high_confidence:
+        suggestion = "🟢 STRONG BUY"
+        explanation = (
+            f"The models predict a strong upward movement of {pred_change:+.2f}% with {confidence:.1f}% confidence. "
+            f"All {up_votes} models agree on upward direction. The predicted price ${predicted_price:.2f} represents "
+            f"a significant increase from the current price ${current_price:.2f}. Consider entering a position "
+            f"with appropriate risk management."
+        )
+    elif pred_change >= buy_threshold and confidence >= high_confidence:
+        suggestion = "🟢 BUY"
+        explanation = (
+            f"The models predict an upward movement of {pred_change:+.2f}% with {confidence:.1f}% confidence. "
+            f"{up_votes} out of 3 models agree on upward direction. The predicted price ${predicted_price:.2f} "
+            f"suggests a moderate gain from the current price ${current_price:.2f}. This could be a good entry "
+            f"point, but monitor the market closely."
+        )
+    elif pred_change >= buy_threshold:
+        suggestion = "🟡 WEAK BUY"
+        explanation = (
+            f"The models predict a slight upward movement of {pred_change:+.2f}%, but confidence is only "
+            f"{confidence:.1f}%. Only {up_votes} out of 3 models agree on upward direction. The predicted price "
+            f"${predicted_price:.2f} is slightly higher than current ${current_price:.2f}. Exercise caution and "
+            f"consider waiting for stronger confirmation."
+        )
+    elif pred_change <= strong_sell_threshold and confidence >= high_confidence:
+        suggestion = "🔴 STRONG SELL"
+        explanation = (
+            f"The models predict a strong downward movement of {pred_change:+.2f}% with {confidence:.1f}% confidence. "
+            f"All {down_votes} models agree on downward direction. The predicted price ${predicted_price:.2f} represents "
+            f"a significant decrease from the current price ${current_price:.2f}. Consider exiting long positions "
+            f"or entering short positions with proper risk management."
+        )
+    elif pred_change <= sell_threshold and confidence >= high_confidence:
+        suggestion = "🔴 SELL"
+        explanation = (
+            f"The models predict a downward movement of {pred_change:+.2f}% with {confidence:.1f}% confidence. "
+            f"{down_votes} out of 3 models agree on downward direction. The predicted price ${predicted_price:.2f} "
+            f"suggests a moderate decline from the current price ${current_price:.2f}. Consider reducing positions "
+            f"or tightening stop-loss orders."
+        )
+    elif pred_change <= sell_threshold:
+        suggestion = "🟡 WEAK SELL"
+        explanation = (
+            f"The models predict a slight downward movement of {pred_change:+.2f}%, but confidence is only "
+            f"{confidence:.1f}%. Only {down_votes} out of 3 models agree on downward direction. The predicted price "
+            f"${predicted_price:.2f} is slightly lower than current ${current_price:.2f}. Exercise caution and "
+            f"monitor the position closely."
+        )
+    else:
+        suggestion = "⚪ HOLD"
+        explanation = (
+            f"The models predict minimal movement ({pred_change:+.2f}%) with {confidence:.1f}% confidence. "
+            f"The predicted price ${predicted_price:.2f} is close to the current price ${current_price:.2f}. "
+            f"Model consensus is mixed: {up_votes} models suggest up, {down_votes} suggest down. "
+            f"This suggests sideways movement or uncertainty. Consider waiting for clearer signals or "
+            f"maintaining current positions."
+        )
+    
+    return suggestion, explanation
+
+
 def get_next_prediction_id(csv_path: str) -> int:
     try:
         if not os.path.exists(csv_path) or os.stat(csv_path).st_size == 0:
@@ -555,6 +635,15 @@ with tab1:
                                 st.metric("Expected Change", f"{pred_change_pct:+.2f}%")
                             st.text(f"Consensus: CNN {votes['CNN']} | LSTM {votes['LSTM']} | XGBoost {votes['XGBoost']}")
                             st.text(f"Confidence: {confidence:.1f}%")
+                            
+                            # Generate and display suggestion with explanation
+                            suggestion, explanation = generate_suggestion(
+                                current_price, predicted_price, pred_change_pct, confidence, votes
+                            )
+                            st.markdown("---")
+                            st.subheader("💡 Trading Suggestion")
+                            st.markdown(f"### {suggestion}")
+                            st.info(explanation)
 
                             # TIMESTAMP LOGIC: Capture exact time when prediction is made
                             # Record current time as ISO format string for consistent storage
