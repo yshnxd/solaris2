@@ -480,8 +480,8 @@ if evaluate_results:
         st.info("No prediction history found.")
 
 with tab1:
-    st.title("StockWise (Simple)")
-    st.caption("Hybrid Machine Learning Stock Price Prediction (clean UI)")
+    st.title("StockWise")
+    st.caption("Hybrid Machine Learning Stock Price Prediction")
 
     # Fetch data
     main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
@@ -536,8 +536,8 @@ with tab1:
         st.plotly_chart(fig, use_container_width=True)
 
         # Prediction
-        st.subheader("AI Prediction")
-        trigger = run_prediction or st.button("Generate AI Prediction")
+        st.subheader("ML Prediction")
+        trigger = run_prediction or st.button("Generate ML Prediction")
         if trigger:
             with st.spinner("Running models..."):
                 try:
