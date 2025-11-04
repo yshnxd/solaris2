@@ -862,15 +862,199 @@ with tab2:
         st.info("No prediction history file found.")
 
 with tab3:
-    st.header("Theory: Models and Indicators (Brief)")
-    st.write("This app uses an ensemble of LSTM, CNN, and XGBoost with a meta-learner to predict 1-hour forward returns, converted to price using the current price.")
-    st.subheader("Models")
-    st.markdown("- LSTM: captures long-range temporal dependencies")
-    st.markdown("- CNN: learns local temporal patterns")
-    st.markdown("- XGBoost: models tabular non-linear interactions")
-    st.markdown("- Meta-learner: blends model outputs for stability")
-    st.subheader("Indicators")
-    st.markdown("- Trend: SMA, EMA, MACD")
-    st.markdown("- Momentum: Returns, RSI")
-    st.markdown("- Volatility: Rolling std of returns")
-    st.markdown("- Volume: 1h change, 24h MA")
+    st.header("Theory")
+    
+    st.markdown("""
+    The StockWise system is built upon the theoretical foundation of time series forecasting, 
+    machine learning regression, and ensemble learning. It operates on the principle that stock prices, 
+    though highly volatile, exhibit short-term statistical dependencies that can be learned from historical 
+    data through proper feature engineering and model design.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("Problem Formulation")
+    
+    st.markdown("""
+    The app's main predictive task is **one-hour-ahead stock price forecasting**. This is formulated as a 
+    supervised regression problem where the target variable is the next-hour return, defined as:
+    """)
+    
+    st.latex(r"y_{t+1} = \frac{p_{t+1} - p_t}{p_t}")
+    
+    st.markdown("""
+    where $p_t$ is the stock's closing price at time $t$. Using returns rather than raw prices allows 
+    the model to generalize across multiple tickers with varying price scales and to capture relative 
+    percentage changes instead of absolute price levels.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("Feature Construction")
+    
+    st.markdown("""
+    StockWise generates predictive features from historical price and volume data. Each feature is designed 
+    to represent a specific financial behavior such as trend, momentum, or volatility. All computations are 
+    **causal**—meaning each feature at time $t$ only uses data up to time $t$, ensuring no information from 
+    the future leaks into the training process.
+    """)
+    
+    st.markdown("#### 1. Lagged Returns")
+    st.markdown("Momentum is represented through lagged returns of different horizons:")
+    st.latex(r"r_t^{(h)} = \frac{p_t - p_{t-h}}{p_{t-h}}, \quad h \in \{1, 3, 6, 12, 24\}")
+    st.markdown("These indicate how much the price has changed in recent hours and serve as short to long-term momentum indicators.")
+    
+    st.markdown("#### 2. Rolling Volatility")
+    st.markdown("Volatility measures the degree of price fluctuations within a specific period:")
+    st.latex(r"\sigma_{t,W} = \sqrt{\frac{1}{W} \sum_{i=0}^{W-1} (r_{t-i}^{(1)} - \bar{r}_{t,W})^2}")
+    st.markdown("with $\\bar{r}_{t,W}$ being the mean of recent returns over window $W$. This captures the market's recent turbulence or stability.")
+    
+    st.markdown("#### 3. Relative Strength Index (RSI)")
+    st.markdown("RSI gauges the speed and change of price movements using a 14-hour window:")
+    st.latex(r"\text{RSI}_t = 100 - \frac{100}{1 + \text{RS}_t}, \quad \text{where } \text{RS}_t = \frac{\text{AvgGain}_t}{\text{AvgLoss}_t}")
+    st.markdown("This provides insight into overbought or oversold conditions.")
+    
+    st.markdown("#### 4. MACD and Signal Line")
+    st.markdown("Trend-following behavior is extracted using moving averages:")
+    st.latex(r"\text{MACD}_t = \text{EMA}_t^{(12)} - \text{EMA}_t^{(26)}, \quad \text{Signal}_t = \text{EMA}_t^{(9)}(\text{MACD})")
+    st.markdown("MACD and its difference from the signal line indicate potential reversals or momentum shifts.")
+    
+    st.markdown("#### 5. SMA and EMA")
+    st.markdown("Trend indicators are further strengthened by simple and exponential moving averages:")
+    st.latex(r"\text{SMA}_{t,w} = \frac{1}{w} \sum_{i=0}^{w-1} p_{t-i}")
+    st.markdown("These smooth price data and capture directional trends.")
+    
+    st.markdown("#### 6. Volume Features")
+    st.markdown("Volume dynamics are measured through percent changes and rolling averages:")
+    st.latex(r"\Delta V_t^{(1)} = \frac{V_t - V_{t-1}}{V_{t-1}}, \quad \bar{V}_{t,24} = \frac{1}{24} \sum_{i=0}^{23} V_{t-i}")
+    st.markdown("These help reflect liquidity and market participation intensity.")
+    
+    st.markdown("#### 7. Cross-Asset Returns")
+    st.markdown("Returns of other major tickers are included:")
+    st.latex(r"r_t^{(a,1)} = \frac{p_t^{(a)} - p_{t-1}^{(a)}}{p_{t-1}^{(a)}}")
+    st.markdown("These cross-asset influences capture broader sector and market sentiment.")
+    
+    st.markdown("#### 8. Calendar and Time Features")
+    st.markdown("Temporal periodicities are represented using cyclical encodings of hour and day:")
+    st.latex(r"\text{hour\_sin}_t = \sin\left(\frac{2\pi \cdot \text{hour}_t}{24}\right), \quad \text{hour\_cos}_t = \cos\left(\frac{2\pi \cdot \text{hour}_t}{24}\right)")
+    st.markdown("This allows the model to recognize repeating intraday patterns.")
+    
+    st.markdown("""
+    **Normalization:** Before model training, all features are standardized using Z-score normalization, 
+    fitted only on the training data to prevent data leakage.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("Model Architecture")
+    
+    st.markdown("""
+    StockWise employs a **hybrid ensemble learning approach** that integrates three distinct predictive 
+    models—XGBoost, CNN, and LSTM—combined through a stacking meta-learner. Each component serves a 
+    specialized purpose within the forecasting pipeline.
+    """)
+    
+    st.markdown("#### 1. XGBoost (Extreme Gradient Boosting)")
+    st.markdown("""
+    A tree-based model that captures complex nonlinear relationships among engineered tabular features. 
+    It handles missing data effectively, performs implicit feature selection, and is robust against 
+    overfitting through regularization. In StockWise, XGBoost is trained to minimize Mean Absolute Error (MAE) 
+    using the objective `reg:absoluteerror`.
+    """)
+    
+    st.markdown("#### 2. Convolutional Neural Network (CNN)")
+    st.markdown("""
+    The CNN analyzes sequences of recent returns and feature values. It acts as a pattern detector, 
+    identifying short-term local temporal structures—such as repetitive micro-trends or volatility spikes—that 
+    influence future price movements. Through multiple convolutional layers, the CNN automatically learns 
+    useful filters and local dependencies that hand-engineered indicators might miss.
+    """)
+    
+    st.markdown("#### 3. Long Short-Term Memory Network (LSTM)")
+    st.markdown("""
+    The LSTM is a recurrent neural network capable of modeling long-term temporal dependencies. It maintains 
+    hidden memory states that learn from extended sequences, making it particularly effective for time series 
+    with delayed reactions or momentum that spans many hours. In StockWise, the LSTM processes the same 
+    sequential input as the CNN but focuses on broader context and memory of recent trends.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("Stacking Meta-Learner")
+    
+    st.markdown("""
+    Once the three base models (XGBoost, CNN, and LSTM) are trained, their predictions are combined through 
+    a **stacking meta-learner**. During training, the meta-learner does not directly access the true labels 
+    of the base models' training data; instead, it learns from out-of-fold (OOF) predictions generated through 
+    time-based cross-validation. This ensures that the meta-learner only sees base predictions that are not 
+    biased by overfitting.
+    """)
+    
+    st.markdown("Mathematically, the final ensemble prediction is:")
+    st.latex(r"\hat{y}_t^{(\text{meta})} = w_1 \hat{y}_t^{(\text{XGB})} + w_2 \hat{y}_t^{(\text{CNN})} + w_3 \hat{y}_t^{(\text{LSTM})} + b")
+    
+    st.markdown("""
+    where $w_i$ are weights learned by the meta-learner to minimize the overall error. If the individual 
+    model errors are not perfectly correlated, stacking reduces variance and improves generalization.
+    """)
+    
+    st.markdown("""
+    The meta-learner used in StockWise is a **HistGradientBoosting Regressor**, chosen for its speed and 
+    strong performance on medium-sized tabular datasets. It learns how to balance and trust each base model 
+    differently depending on market conditions and stock characteristics.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("System Workflow")
+    
+    st.markdown("""
+    The complete StockWise forecasting process follows these sequential steps:
+    
+    1. **User Input:** The user selects a stock ticker and prediction horizon (default: one hour ahead).
+    
+    2. **Data Retrieval:** The system fetches the latest hourly OHLCV data for the selected ticker.
+    
+    3. **Data Alignment:** Prices are aligned across all tickers; missing values are handled through forward-filling where appropriate.
+    
+    4. **Feature Engineering:** The app computes all indicators—lagged returns, volatility, RSI, MACD, SMA, EMA, volume features, cross-asset returns, and time-based encodings.
+    
+    5. **Normalization:** Data are scaled using pre-fitted training scalers.
+    
+    6. **Base Model Predictions:** Each base model (XGBoost, CNN, LSTM) produces its own one-hour-ahead forecast.
+    
+    7. **Meta-Learner Prediction:** The out-of-fold-trained meta-learner combines base predictions to produce the final forecasted return.
+    
+    8. **Output Conversion:** The predicted return is converted into a forecasted price:
+    """)
+    
+    st.latex(r"\hat{p}_{t+1} = p_t \times (1 + \hat{y}_{t+1})")
+    
+    st.markdown("""
+    The app then displays the predicted next-hour price, the direction of movement (up or down), and a 
+    confidence indicator derived from ensemble disagreement.
+    
+    9. **Logging:** All predictions, intermediate outputs, and timestamps are saved to evaluate live accuracy over time.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("Evaluation Metrics")
+    
+    st.markdown("""
+    The app and research paper primarily assess accuracy through **Mean Absolute Error (MAE)** and 
+    **Mean Absolute Percentage Error (MAPE)**:
+    """)
+    
+    st.latex(r"\text{MAE} = \frac{1}{N} \sum |y_t - \hat{y}_t|, \quad \text{MAPE} = \frac{100\%}{N} \sum \left|\frac{y_t - \hat{y}_t}{y_t}\right|")
+    
+    st.markdown("""
+    A lower MAE and MAPE indicate higher predictive accuracy. The StockWise hybrid meta-learner achieved a 
+    test MAE of **0.003674**, outperforming its base models and achieving an average live absolute price error 
+    of **$1.22 (≈0.67%)** across 100 predictions.
+    """)
+    
+    st.markdown("""
+    **Directional accuracy** (percentage of correct up/down predictions) is also analyzed to assess the 
+    model's usefulness for decision-making.
+    """)
