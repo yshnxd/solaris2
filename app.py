@@ -1158,7 +1158,4 @@ with tab3:
     of **$1.22 (≈0.67%)** across 100 predictions.
     """)
     
-    st.markdown("""
-    **Directional accuracy** (percentage of correct up/down predictions) is also analyzed to assess the 
-    model's usefulness for decision-making.
-    """)
+
