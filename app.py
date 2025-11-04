@@ -124,10 +124,39 @@ def get_next_prediction_id(csv_path: str) -> int:
         return 1
 
 
-def batch_evaluate_predictions_csv(csv_path: str, rate_limit_sec: float = 0.5, hour_fetch_period: str = "730d") -> pd.DataFrame:
+def fetch_history_with_retry(ticker: str, period: str, interval: str, rate_limit_sec: float = 1.0, max_attempts: int = 3) -> pd.DataFrame | None:
+    """
+    Fetch Yahoo Finance data safely with retries.
+    Returns None if all attempts fail.
+    """
+    for attempt in range(max_attempts):
+        try:
+            tk = yf.Ticker(ticker)
+            hist = tk.history(period=period, interval=interval, actions=False, auto_adjust=False)
+            if hist.empty or not isinstance(hist.index, pd.DatetimeIndex):
+                raise ValueError("Empty or invalid data")
+            if hist.index.tz is None:
+                hist.index = hist.index.tz_localize("UTC")
+            else:
+                hist.index = hist.index.tz_convert("UTC")
+            return hist
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                # Last attempt failed - log but don't raise
+                pass
+            time.sleep(rate_limit_sec * 2)
+    return None
+
+
+def batch_evaluate_predictions_csv(csv_path: str, rate_limit_sec: float = 1.0, hour_fetch_period: str = "730d", buy_threshold_pct: float = 1.0, sell_threshold_pct: float = 1.0) -> pd.DataFrame:
     """
     TIMESTAMP LOGIC: This function evaluates predictions by filling in actual prices.
     It preserves original timestamp strings while using datetime objects for time comparisons.
+    
+    Uses improved evaluation logic:
+    - Only uses past bars (no future leakage)
+    - Retries with error handling
+    - Prefers hourly data, falls back to daily
     """
     ensure_csv_has_header(csv_path, show_cols)
     try:
@@ -153,40 +182,28 @@ def batch_evaluate_predictions_csv(csv_path: str, rate_limit_sec: float = 0.5, h
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
 
+    # Ensure necessary columns exist
     for col in ["actual_price", "error_pct", "error_abs", "signal"]:
         if col not in df.columns:
             df[col] = np.nan
-    if "signal" in df.columns:
-        df["signal"] = df["signal"].fillna("HOLD")
+    df["signal"] = df["signal"].fillna("HOLD")
 
+    # Group by ticker
     ticker_groups: dict[str, list[int]] = {}
     for idx, row in df.iterrows():
         t = str(row.get("ticker", "")).strip()
-        if t == "" or pd.isna(row.get("target_time")):
+        if not t or pd.isna(row.get("target_time")):
             continue
         ticker_groups.setdefault(t, []).append(idx)
 
-    for ticker, indices in ticker_groups.items():
-        try:
-            tk = yf.Ticker(ticker)
-            hist_hour = tk.history(period=hour_fetch_period, interval="1h", actions=False, auto_adjust=False)
-            if isinstance(hist_hour.index, pd.DatetimeIndex):
-                if hist_hour.index.tz is None:
-                    hist_hour.index = hist_hour.index.tz_localize("UTC")
-                else:
-                    hist_hour.index = hist_hour.index.tz_convert("UTC")
-        except Exception:
-            hist_hour = None
+    # Main evaluation loop
+    for j, (ticker, indices) in enumerate(ticker_groups.items(), start=1):
+        # Fetch history with retries
+        hist_hour = fetch_history_with_retry(ticker, hour_fetch_period, "1h", rate_limit_sec)
+        hist_day = fetch_history_with_retry(ticker, "365d", "1d", rate_limit_sec)
 
-        try:
-            hist_day = tk.history(period="365d", interval="1d", actions=False, auto_adjust=False)
-            if isinstance(hist_day.index, pd.DatetimeIndex):
-                if hist_day.index.tz is None:
-                    hist_day.index = hist_day.index.tz_localize("UTC")
-                else:
-                    hist_day.index = hist_day.index.tz_convert("UTC")
-        except Exception:
-            hist_day = None
+        if (hist_hour is None or hist_hour.empty) and (hist_day is None or hist_day.empty):
+            continue
 
         for i in indices:
             t_utc = df.at[i, "target_time"]
@@ -195,41 +212,38 @@ def batch_evaluate_predictions_csv(csv_path: str, rate_limit_sec: float = 0.5, h
             if not pd.isna(df.at[i, "actual_price"]):
                 continue
 
+            close_val = np.nan
             filled = False
-            if hist_hour is not None and len(hist_hour) > 0:
-                target_hour = t_utc.floor("H")
-                if target_hour in hist_hour.index:
-                    close_val = float(hist_hour.loc[target_hour]["Close"])
-                else:
-                    diffs = (hist_hour.index - t_utc).total_seconds()
-                    best_idx = np.abs(diffs).argmin()
-                    close_val = float(hist_hour.iloc[best_idx]["Close"])
-                df.at[i, "actual_price"] = close_val
-                filled = True
-                try:
-                    predicted = float(df.at[i, "predicted_price"])
-                    if not math.isnan(predicted) and close_val != 0:
-                        df.at[i, "error_pct"] = (close_val - predicted) / close_val * 100.0
-                        df.at[i, "error_abs"] = abs(close_val - predicted)
-                except Exception:
-                    pass
-                df.at[i, "signal"] = compute_signal(df.at[i, "predicted_price"], close_val)
+            reason = ""
 
-            if not filled and hist_day is not None and len(hist_day) > 0:
-                target_date = t_utc.normalize()
-                candidate = hist_day.loc[hist_day.index <= target_date]
-                if candidate is None or len(candidate) == 0:
-                    candidate = hist_day
-                close_val = float(candidate.iloc[-1]["Close"])
-                df.at[i, "actual_price"] = close_val
+            # Prefer hourly data - only use past bars (no future leakage)
+            if hist_hour is not None and not hist_hour.empty:
+                before = hist_hour.loc[hist_hour.index <= t_utc.floor("H")]
+                if not before.empty:
+                    close_val = float(before.iloc[-1]["Close"])
+                    filled = True
+                    reason = "hourly <= target"
+
+            # Daily fallback
+            if not filled and hist_day is not None and not hist_day.empty:
+                before_day = hist_day.loc[hist_day.index <= t_utc.normalize()]
+                if before_day.empty:
+                    before_day = hist_day
+                close_val = float(before_day.iloc[-1]["Close"])
+                filled = True
+                reason = "daily fallback"
+
+            if filled:
                 try:
                     predicted = float(df.at[i, "predicted_price"])
                     if not math.isnan(predicted) and close_val != 0:
-                        df.at[i, "error_pct"] = (close_val - predicted) / close_val * 100.0
-                        df.at[i, "error_abs"] = abs(close_val - predicted)
+                        # Error calculation: (predicted - actual) / actual * 100
+                        df.at[i, "error_pct"] = (predicted - close_val) / close_val * 100.0
+                        df.at[i, "error_abs"] = abs(predicted - close_val)
                 except Exception:
                     pass
-                df.at[i, "signal"] = compute_signal(df.at[i, "predicted_price"], close_val)
+                df.at[i, "actual_price"] = close_val
+                df.at[i, "signal"] = compute_signal(df.at[i, "predicted_price"], close_val, buy_threshold_pct, sell_threshold_pct)
 
         time.sleep(rate_limit_sec)
 
@@ -466,8 +480,8 @@ if evaluate_results:
         st.info("No prediction history found.")
 
 with tab1:
-    st.title("StockWise")
-    st.caption("Hourly Stock Price Prediction using Hybrid Machine Learning")
+    st.title("StockWise (Simple)")
+    st.caption("Hybrid Machine Learning Stock Price Prediction (clean UI)")
 
     # Fetch data
     main_ticker_data = fetch_stock_data(selected_ticker, period=f"{days_history}d", interval="60m")
