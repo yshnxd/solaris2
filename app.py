@@ -150,7 +150,7 @@ def generate_suggestion(current_price: float, predicted_price: float, pred_chang
         explanation = (
             f"The models predict a slight upward movement of {pred_change:+.2f}%, but confidence is only "
             f"{confidence:.1f}%. Only {up_votes} out of 3 models agree on upward direction. The predicted price "
-            f"${predicted_price:.2f} is slightly higher than current ${current_price:.2f}. Exercise caution and "
+            f"${predicted_price:.2f} is slightly higher than the current price of ${current_price:.2f}. Exercise caution and "
             f"consider waiting for stronger confirmation."
         )
     elif pred_change <= strong_sell_threshold and confidence >= high_confidence:
@@ -174,14 +174,14 @@ def generate_suggestion(current_price: float, predicted_price: float, pred_chang
         explanation = (
             f"The models predict a slight downward movement of {pred_change:+.2f}%, but confidence is only "
             f"{confidence:.1f}%. Only {down_votes} out of 3 models agree on downward direction. The predicted price "
-            f"${predicted_price:.2f} is slightly lower than current ${current_price:.2f}. Exercise caution and "
+            f"${predicted_price:.2f} is slightly lower than the current price of ${current_price:.2f}. Exercise caution and "
             f"monitor the position closely."
         )
     else:
         suggestion = "⚪ HOLD"
         explanation = (
             f"The models predict minimal movement ({pred_change:+.2f}%) with {confidence:.1f}% confidence. "
-            f"The predicted price ${predicted_price:.2f} is close to the current price ${current_price:.2f}. "
+            f"The predicted price ${predicted_price:.2f} is close to the current price of ${current_price:.2f}. "
             f"Model consensus is mixed: {up_votes} models suggest up, {down_votes} suggest down. "
             f"This suggests sideways movement or uncertainty. Consider waiting for clearer signals or "
             f"maintaining current positions."
