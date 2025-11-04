@@ -196,7 +196,11 @@ def generate_suggestion(current_price: float, predicted_price: float, pred_chang
             consensus_msg = "Model consensus is mixed with no clear direction."
             movement_msg = "This suggests sideways movement or uncertainty."
         
-        explanation = f"The models predict minimal movement ({pred_change:+.2f}%) with {confidence:.1f}% confidence. The predicted price ${predicted_price:.2f} is close to the current price of ${current_price:.2f}. {consensus_msg} {movement_msg} Consider waiting for clearer signals or maintaining current positions."
+        explanation = (
+            f"The models predict minimal movement ({pred_change:+.2f}%) with {confidence:.1f}% confidence. "
+            f"The predicted price ${predicted_price:.2f} is close to the current price of ${current_price:.2f}. "
+            f"{consensus_msg} {movement_msg} Consider waiting for clearer signals or maintaining current positions."
+        )
     
     return suggestion, explanation
 
@@ -654,7 +658,7 @@ with tab1:
                             st.markdown("---")
                             st.subheader("💡 Trading Suggestion")
                             st.markdown(f"### {suggestion}")
-                            st.write(explanation)
+                            st.text(explanation)
 
                             # TIMESTAMP LOGIC: Capture exact time when prediction is made
                             # Record current time as ISO format string for consistent storage
