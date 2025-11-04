@@ -546,7 +546,7 @@ st.sidebar.header("Controls")
 selected_ticker = st.sidebar.text_input("Ticker", "AAPL").upper()
 days_history = st.sidebar.slider("Historical days", min_value=30, max_value=729, value=90)
 run_prediction = st.sidebar.button("Generate Prediction")
-evaluate_results = st.sidebar.button("Evaluate History (fill actuals)")
+evaluate_results = st.sidebar.button("Evaluate History")
 run_watchlist = st.sidebar.button("Watchlist Analysis")
 
 st.sidebar.subheader("Chart Overlays")
